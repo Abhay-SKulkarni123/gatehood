@@ -53,7 +53,7 @@ EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true
 
 `EXPO_PUBLIC_FUNCTIONS_REGION` is the Cloud Functions deployment region.
 
-`EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` points Auth and Firestore at local emulators and enables Android cleartext HTTP for that development build only. Set it to `false` or leave it unset for production/release builds. App Check has no emulator; the Functions emulator and client wiring are deferred until Functions source exists.
+`EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` points Auth and Firestore at local emulators. Android cleartext HTTP is enabled only for local development and EAS `development` builds when this flag is exactly `true`; EAS `preview` and `production` builds remain restricted even if the flag is mistakenly set. App Check has no emulator; the Functions emulator and client wiring are deferred until Functions source exists.
 
 ### Backend and deployment variables
 
@@ -71,14 +71,19 @@ Missing or invalid client configuration produces a startup error in the app with
 
 ### Android cleartext traffic
 
-`app.config.js` sets the `expo-build-properties` value `android.usesCleartextTraffic` from `EXPO_PUBLIC_USE_FIREBASE_EMULATOR`. Only the exact string `true` enables it, so release builds without that value do not globally permit cleartext HTTP. The iOS dynamic framework configuration is unchanged.
+`app.config.js` sets the `expo-build-properties` value `android.usesCleartextTraffic` to `true` only when `EXPO_PUBLIC_USE_FIREBASE_EMULATOR` is exactly `true` and either `EAS_BUILD_PROFILE` is unset/empty (local development) or exactly `development`. EAS `preview` and `production` profiles always resolve to `false`, even if the emulator flag is mistakenly set. Any profile with the emulator flag `false` or unset also resolves to `false`. The iOS dynamic framework configuration is unchanged.
 
-Inspect the resolved config for each build environment:
+Verify with these exact invocations:
 
 ```bash
-EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true npx expo config --type public
-EXPO_PUBLIC_USE_FIREBASE_EMULATOR=false npx expo config --type public
+env -u EAS_BUILD_PROFILE EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true npx expo config --type public
+EAS_BUILD_PROFILE=development EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true npx expo config --type public
+EAS_BUILD_PROFILE=preview EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true npx expo config --type public
+EAS_BUILD_PROFILE=production EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true npx expo config --type public
+EAS_BUILD_PROFILE=production env -u EXPO_PUBLIC_USE_FIREBASE_EMULATOR npx expo config --type public
 ```
+
+Local Expo CLI commands such as `npx expo run:android` must leave `EAS_BUILD_PROFILE` unset and set `EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` to permit emulator HTTP traffic.
 
 ## Firebase configuration
 

@@ -1,4 +1,8 @@
 const useFirebaseEmulator = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR === 'true';
+const easBuildProfile = process.env.EAS_BUILD_PROFILE ?? '';
+const isLocalDevelopment = easBuildProfile === '';
+const isEasDevelopmentBuild = easBuildProfile === 'development';
+const usesCleartextTraffic = useFirebaseEmulator && (isLocalDevelopment || isEasDevelopmentBuild);
 
 module.exports = {
   expo: {
@@ -34,7 +38,7 @@ module.exports = {
         'expo-build-properties',
         {
           android: {
-            usesCleartextTraffic: useFirebaseEmulator,
+            usesCleartextTraffic,
           },
           ios: {
             useFrameworks: 'dynamic',

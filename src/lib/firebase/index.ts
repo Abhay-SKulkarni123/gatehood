@@ -12,6 +12,8 @@ import type { FirebaseServices } from '@/types/firebase';
 
 let cachedAppCheck: FirebaseServices['appCheck'] | null = null;
 let cachedServices: FirebaseServices | null = null;
+let authEmulatorConnected = false;
+let firestoreEmulatorConnected = false;
 
 function emulatorHost(): string {
   return Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
@@ -53,8 +55,16 @@ export function initializeFirebase(config: ClientConfig): FirebaseServices {
 
   if (config.useFirebaseEmulator) {
     const host = emulatorHost();
-    connectAuthEmulator(auth, `http://${host}:9099`);
-    connectFirestoreEmulator(firestore, host, 8080);
+
+    if (!authEmulatorConnected) {
+      connectAuthEmulator(auth, `http://${host}:9099`);
+      authEmulatorConnected = true;
+    }
+
+    if (!firestoreEmulatorConnected) {
+      connectFirestoreEmulator(firestore, host, 8080);
+      firestoreEmulatorConnected = true;
+    }
   }
 
   const services: FirebaseServices = {
