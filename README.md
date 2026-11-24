@@ -53,7 +53,7 @@ EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true
 
 `EXPO_PUBLIC_FUNCTIONS_REGION` is the Cloud Functions deployment region.
 
-`EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` points Auth, Firestore, and Functions at local emulators. App Check has no emulator.
+`EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` points Auth and Firestore at local emulators and enables Android cleartext HTTP for that development build only. Set it to `false` or leave it unset for production/release builds. App Check has no emulator; the Functions emulator and client wiring are deferred until Functions source exists.
 
 ### Backend and deployment variables
 
@@ -69,6 +69,17 @@ FUNCTIONS_REGION=us-central1
 
 Missing or invalid client configuration produces a startup error in the app with a retry action.
 
+### Android cleartext traffic
+
+`app.config.js` sets the `expo-build-properties` value `android.usesCleartextTraffic` from `EXPO_PUBLIC_USE_FIREBASE_EMULATOR`. Only the exact string `true` enables it, so release builds without that value do not globally permit cleartext HTTP. The iOS dynamic framework configuration is unchanged.
+
+Inspect the resolved config for each build environment:
+
+```bash
+EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true npx expo config --type public
+EXPO_PUBLIC_USE_FIREBASE_EMULATOR=false npx expo config --type public
+```
+
 ## Firebase configuration
 
 A real Firebase project is not connected in this repository. Native builds require your own Firebase app configuration files placed at the repository root:
@@ -80,7 +91,7 @@ A real Firebase project is not connected in this repository. Native builds requi
 
 The Android package is `com.gatehood.app` and the iOS bundle identifier is `com.gatehood.app`. Your Firebase apps must use matching identifiers.
 
-App Check is initialized from `src/lib/firebase/index.ts` through a singleton Firebase module. In debug builds, the Android and Apple debug providers are selected. In release builds, Play Integrity and App Attest with DeviceCheck fallback are selected as the intended provider configuration. Production tokens require real Firebase console app registration and App Check provider configuration; no production enforcement is claimed or operational in Phase 1.
+App Check is initialized from `src/lib/firebase/index.ts` through a singleton Firebase module. It is initialized immediately after `getApp()` and before `getAuth()`, `getFirestore()`, or `getFunctions()` are called, and it is cached so repeated calls and retries do not initialize it again. In debug builds, the Android and Apple debug providers are selected. In release builds, Play Integrity and App Attest with DeviceCheck fallback are selected as the intended provider configuration. Production tokens require real Firebase console app registration and App Check provider configuration; no production enforcement is claimed or operational in Phase 1.
 
 ## Running locally
 
@@ -128,12 +139,12 @@ Emulator ports:
 - Firestore: `8080`
 - Emulator UI: `5000`
 
-Functions emulator configuration will be added when the Functions source exists. Firestore rules are explicitly default-deny in Phase 1.
+Only the Auth and Firestore emulators are configured in `firebase.json`. The client only calls `connectAuthEmulator` and `connectFirestoreEmulator`; there is no Functions emulator running and no `connectFunctionsEmulator` call in Phase 1. Functions emulator configuration and client wiring are deferred until Functions source and a Functions emulator entry exist. Firestore rules are explicitly default-deny in Phase 1.
 
 ## Folder structure
 
 ```text
-app.json
+app.config.js
 firebase.json
 firestore.rules
 firestore.indexes.json
@@ -159,7 +170,7 @@ Implemented:
 - Strict TypeScript configuration
 - Validated client environment configuration
 - Firebase singleton initialization for app, auth, firestore, functions, and app-check
-- Emulator wiring for Auth, Firestore, and Functions
+- Emulator wiring for Auth and Firestore
 - App Check provider selection hooks
 - Default-deny Firestore rules
 - Foundational reusable UI components

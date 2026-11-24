@@ -5,21 +5,23 @@ import {
 } from '@react-native-firebase/app-check';
 import { connectAuthEmulator, getAuth } from '@react-native-firebase/auth';
 import { connectFirestoreEmulator, getFirestore } from '@react-native-firebase/firestore';
-import {
-  connectFunctionsEmulator,
-  getFunctions,
-} from '@react-native-firebase/functions';
+import { getFunctions } from '@react-native-firebase/functions';
 import { Platform } from 'react-native';
 import type { ClientConfig } from '@/config/env';
 import type { FirebaseServices } from '@/types/firebase';
 
+let cachedAppCheck: FirebaseServices['appCheck'] | null = null;
 let cachedServices: FirebaseServices | null = null;
 
 function emulatorHost(): string {
   return Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
 }
 
-function createAppCheck(app: FirebaseServices['app']): FirebaseServices['appCheck'] {
+function getAppCheck(app: FirebaseServices['app']): FirebaseServices['appCheck'] {
+  if (cachedAppCheck) {
+    return cachedAppCheck;
+  }
+
   const provider = new ReactNativeFirebaseAppCheckProvider();
   provider.configure({
     android: {
@@ -30,10 +32,12 @@ function createAppCheck(app: FirebaseServices['app']): FirebaseServices['appChec
     },
   });
 
-  return initializeAppCheck(app, {
+  cachedAppCheck = initializeAppCheck(app, {
     provider,
     isTokenAutoRefreshEnabled: true,
   });
+
+  return cachedAppCheck;
 }
 
 export function initializeFirebase(config: ClientConfig): FirebaseServices {
@@ -42,16 +46,15 @@ export function initializeFirebase(config: ClientConfig): FirebaseServices {
   }
 
   const app = getApp();
+  const appCheck = getAppCheck(app);
   const auth = getAuth(app);
   const firestore = getFirestore(app);
   const functions = getFunctions(app, config.functionsRegion);
-  const appCheck = createAppCheck(app);
 
   if (config.useFirebaseEmulator) {
     const host = emulatorHost();
     connectAuthEmulator(auth, `http://${host}:9099`);
     connectFirestoreEmulator(firestore, host, 8080);
-    connectFunctionsEmulator(functions, host, 5001);
   }
 
   const services: FirebaseServices = {
