@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useReducer, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { ChoiceChip } from '@/components/choice-chip';
 import { EmptyState } from '@/components/empty-state';
@@ -7,7 +7,12 @@ import { LoadingIndicator } from '@/components/loading-indicator';
 import { PrimaryButton } from '@/components/primary-button';
 import { Screen } from '@/components/screen';
 import { getClientConfig } from '@/config/env';
-import { loadBuyerProject, subscribeBuyerFeed } from '@/lib/data/buyer';
+import { createFeedListenerController, loadBuyerProject } from '@/lib/data/buyer';
+import {
+  createFeedState,
+  feedReducer,
+  feedScopeKey,
+} from '@/lib/data/feed-state';
 import {
   describeConstructionProgress,
   describePossessionDate,
@@ -18,7 +23,8 @@ import { callMarkNoticeRead, describeCallableError } from '@/lib/functions';
 import { getFirebaseServices } from '@/lib/firebase';
 import { useAuth } from '@/providers/auth-provider';
 import { useMembership } from '@/providers/membership-provider';
-import type { FeedEntryDoc, FirestoreTimestamp, ProjectDoc, UnitDoc } from '@/types/domain';
+import { useOfflineSync } from '@/providers/offline-sync-provider';
+import type { FirestoreTimestamp, ProjectDoc, UnitDoc } from '@/types/domain';
 import { colors, radius, spacing, typography } from '@/theme';
 
 function formatTimestamp(value: FirestoreTimestamp): string {
@@ -28,13 +34,22 @@ function formatTimestamp(value: FirestoreTimestamp): string {
 export default function BuyerHomeScreen() {
   const { user, logout, actionPending } = useAuth();
   const { state: membership } = useMembership();
+  const {
+    isOnline,
+    pendingNoticeIds,
+    syncError,
+    queueRead,
+    removePendingRead,
+  } = useOfflineSync();
   const { constructionProjectId } = getClientConfig();
   const uid = user?.uid ?? null;
+  const scopeKey = feedScopeKey(uid ?? '', constructionProjectId);
 
-  const [entries, setEntries] = useState<FeedEntryDoc[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [feedRetryKey, setFeedRetryKey] = useState(0);
+  const [feedState, dispatchFeed] = useReducer(feedReducer, scopeKey, createFeedState);
+  if (feedState.scopeKey !== scopeKey) {
+    dispatchFeed({ type: 'scopeChanged', scopeKey });
+  }
+  const feed = feedState.scopeKey === scopeKey ? feedState : createFeedState(scopeKey);
   const [feedFilter, setFeedFilter] = useState<BuyerFeedFilter>('all');
   const [project, setProject] = useState<ProjectDoc | null>(null);
   const [projectLoading, setProjectLoading] = useState(true);
@@ -47,35 +62,34 @@ export default function BuyerHomeScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const membershipRecord = membership.status === 'ready' ? membership.membership : null;
+  const pendingSet = useMemo(() => new Set(pendingNoticeIds), [pendingNoticeIds]);
+  const displayedError = error ?? syncError;
 
   useEffect(() => {
     if (!uid) {
       return;
     }
     try {
-      const { firestore } = getFirebaseServices();
-      return subscribeBuyerFeed(
-        firestore,
+      const controller = createFeedListenerController(
+        getFirebaseServices().firestore,
         uid,
         constructionProjectId,
-        (data) => {
-          setEntries(data);
-          setLoading(false);
-        },
-        (feedError) => {
-          setLoadError(describeCallableError(feedError));
-          setLoading(false);
-        },
+        (snapshot) => dispatchFeed({ type: 'snapshot', scopeKey, snapshot }),
+        (feedError) =>
+          dispatchFeed({
+            type: 'error',
+            scopeKey,
+            message: describeCallableError(feedError),
+          }),
       );
+      controller.start(feed.limit);
+      return () => controller.stop();
     } catch (feedError) {
       const message = describeCallableError(feedError);
-      void Promise.resolve().then(() => {
-        setLoadError(message);
-        setLoading(false);
-      });
+      void Promise.resolve().then(() => dispatchFeed({ type: 'error', scopeKey, message }));
       return undefined;
     }
-  }, [constructionProjectId, uid, feedRetryKey]);
+  }, [constructionProjectId, uid, scopeKey, feed.limit, feed.retryKey]);
 
   useEffect(() => {
     if (!membershipRecord) {
@@ -141,18 +155,23 @@ export default function BuyerHomeScreen() {
   }, [membershipRecord]);
 
   const filteredEntries = useMemo(
-    () => filterBuyerFeed(entries, membershipRecord, feedFilter),
-    [entries, membershipRecord, feedFilter],
+    () => filterBuyerFeed(feed.entries, membershipRecord, feedFilter),
+    [feed.entries, membershipRecord, feedFilter],
   );
 
   const handleMarkRead = async (noticeId: string) => {
     setBusyNoticeId(noticeId);
     setError(null);
     try {
+      if (!isOnline) {
+        await queueRead(noticeId);
+        return;
+      }
       await callMarkNoticeRead(getFirebaseServices().functions, {
         projectId: constructionProjectId,
         noticeId,
       });
+      await removePendingRead(noticeId);
     } catch (readError) {
       setError(describeCallableError(readError));
     } finally {
@@ -171,7 +190,12 @@ export default function BuyerHomeScreen() {
         <PrimaryButton label="Sign out" loading={actionPending} onPress={() => void logout()} />
       </View>
 
-      {error ? <ErrorState message={error} title="Action failed" /> : null}
+      {displayedError ? (
+        <ErrorState
+          message={displayedError}
+          title={error ? 'Action failed' : 'Read sync pending'}
+        />
+      ) : null}
 
       {membershipRecord ? (
         <View style={styles.card}>
@@ -252,20 +276,28 @@ export default function BuyerHomeScreen() {
             selected={feedFilter === 'unit'}
           />
         </View>
-        {loading ? (
+        {feed.fromCache || !isOnline ? (
+          <Text accessibilityRole="status" style={styles.status}>
+            {feed.fromCache
+              ? 'Showing cached notices. Live updates will resume when available.'
+              : 'Offline. Read actions will sync when the connection returns.'}
+          </Text>
+        ) : null}
+        {feed.loading && feed.entries.length === 0 ? (
           <LoadingIndicator label="Loading notices…" />
-        ) : loadError ? (
+        ) : null}
+        {feed.loading && !feed.loadingMore && feed.entries.length > 0 ? (
+          <LoadingIndicator label="Refreshing notices…" />
+        ) : null}
+        {feed.error ? (
           <ErrorState
-            message={loadError}
-            onRetry={() => {
-              setLoading(true);
-              setLoadError(null);
-              setFeedRetryKey((value) => value + 1);
-            }}
+            message={feed.error}
+            onRetry={() => dispatchFeed({ type: 'retry' })}
             retryLabel="Reload notices"
             title="Notices unavailable"
           />
-        ) : filteredEntries.length === 0 ? (
+        ) : null}
+        {!feed.loading && filteredEntries.length === 0 ? (
           <EmptyState
             message={
               feedFilter === 'tower'
@@ -276,27 +308,37 @@ export default function BuyerHomeScreen() {
             }
             title="No notices"
           />
-        ) : (
-          filteredEntries.map((entry) => (
-            <View key={entry.noticeId} style={styles.notice}>
-              <View style={styles.noticeHeader}>
-                <Text style={styles.noticeTitle}>{entry.title}</Text>
-                {entry.pinned ? <Text style={styles.pinned}>Pinned</Text> : null}
-              </View>
-              <Text style={styles.body}>{entry.body}</Text>
-              <Text style={styles.detail}>Delivered {formatTimestamp(entry.deliveredAt)}</Text>
-              {entry.readAt === null ? (
-                <PrimaryButton
-                  label="Mark as read"
-                  loading={busyNoticeId === entry.noticeId}
-                  onPress={() => void handleMarkRead(entry.noticeId)}
-                />
-              ) : (
-                <Text style={styles.read}>Read {formatTimestamp(entry.readAt)}</Text>
-              )}
+        ) : null}
+        {filteredEntries.map((entry) => (
+          <View key={entry.noticeId} style={styles.notice}>
+            <View style={styles.noticeHeader}>
+              <Text style={styles.noticeTitle}>{entry.title}</Text>
+              {entry.pinned ? <Text style={styles.pinned}>Pinned</Text> : null}
             </View>
-          ))
-        )}
+            <Text style={styles.body}>{entry.body}</Text>
+            <Text style={styles.detail}>Delivered {formatTimestamp(entry.deliveredAt)}</Text>
+            {entry.readAt !== null ? (
+              <Text style={styles.read}>Read {formatTimestamp(entry.readAt)}</Text>
+            ) : pendingSet.has(entry.noticeId) ? (
+              <Text accessibilityRole="status" style={styles.pending}>
+                Pending sync
+              </Text>
+            ) : (
+              <PrimaryButton
+                label="Mark as read"
+                loading={busyNoticeId === entry.noticeId}
+                onPress={() => void handleMarkRead(entry.noticeId)}
+              />
+            )}
+          </View>
+        ))}
+        {feed.loadingMore ? <LoadingIndicator label="Loading more notices…" /> : null}
+        {!feed.loadingMore && feed.hasMore && feed.entries.length > 0 ? (
+          <PrimaryButton
+            label="Load more"
+            onPress={() => dispatchFeed({ type: 'loadMore' })}
+          />
+        ) : null}
       </View>
     </Screen>
   );
@@ -382,5 +424,14 @@ const styles = StyleSheet.create({
   read: {
     ...typography.caption,
     color: colors.accent,
+  },
+  pending: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontWeight: '700',
+  },
+  status: {
+    ...typography.caption,
+    color: colors.textMuted,
   },
 });

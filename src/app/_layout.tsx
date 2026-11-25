@@ -10,6 +10,7 @@ import { getClientConfig } from '@/config/env';
 import { initializeFirebase } from '@/lib/firebase';
 import { AuthProvider } from '@/providers/auth-provider';
 import { MembershipProvider } from '@/providers/membership-provider';
+import { OfflineSyncProvider } from '@/providers/offline-sync-provider';
 import { colors, spacing } from '@/theme';
 
 type BootResult =
@@ -39,16 +40,18 @@ export default function RootLayout() {
         <StatusBar style="light" />
         {boot.ok ? (
           <AuthProvider>
-            <MembershipProvider>
-              <GuardLayout>
-                <Stack
-                  screenOptions={{
-                    headerShown: false,
-                    contentStyle: { backgroundColor: colors.background },
-                  }}
-                />
-              </GuardLayout>
-            </MembershipProvider>
+            <OfflineSyncProvider>
+              <MembershipProvider>
+                <GuardLayout>
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      contentStyle: { backgroundColor: colors.background },
+                    }}
+                  />
+                </GuardLayout>
+              </MembershipProvider>
+            </OfflineSyncProvider>
           </AuthProvider>
         ) : (
           <View style={styles.errorContainer}>

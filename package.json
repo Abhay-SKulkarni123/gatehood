@@ -16,6 +16,8 @@
     "test:rules": "npm run build:functions && firebase emulators:exec --project demo-gatehood --only firestore \"npm --prefix functions test -- --runTestsByPath test/rules.test.ts\""
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/netinfo": "12.0.1",
     "@react-native-firebase/app": "27.1.1",
     "@react-native-firebase/app-check": "27.1.1",
     "@react-native-firebase/auth": "27.1.1",

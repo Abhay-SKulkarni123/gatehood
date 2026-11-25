@@ -1,8 +1,8 @@
-import { collection, doc, getDoc, onSnapshot } from '@react-native-firebase/firestore';
+import { doc, getDoc, getDocs } from '@react-native-firebase/firestore';
 import type { Firestore } from '@react-native-firebase/firestore';
-import type { FeedEntryDoc, FirestoreTimestamp, MembershipDoc } from '@/types/domain';
+import type { FirestoreTimestamp, MembershipDoc } from '@/types/domain';
 import { loadBuyerUnit } from '@/lib/data/units';
-import { loadBuyerProject, subscribeBuyerFeed } from '@/lib/data/buyer';
+import { loadBuyerProject } from '@/lib/data/buyer';
 
 jest.mock('@react-native-firebase/firestore', () => ({
   collection: jest.fn(),
@@ -12,10 +12,8 @@ jest.mock('@react-native-firebase/firestore', () => ({
   onSnapshot: jest.fn(),
 }));
 
-const mockCollection = collection as jest.Mock;
 const mockDoc = doc as jest.Mock;
 const mockGetDoc = getDoc as jest.Mock;
-const mockOnSnapshot = onSnapshot as jest.Mock;
 
 const firestore = {} as Firestore;
 
@@ -43,77 +41,8 @@ function membership(overrides: Partial<MembershipDoc> = {}): MembershipDoc {
   };
 }
 
-function feedDoc(noticeId: string, overrides: Record<string, unknown> = {}) {
-  const value = {
-    uid: 'buyer-1',
-    noticeId,
-    projectId: 'project-1',
-    title: noticeId,
-    body: 'Body',
-    pinned: false,
-    deliveredAt: timestamp,
-    updatedAt: timestamp,
-    readAt: null,
-    audienceType: 'project',
-    audienceTowerIds: [],
-    audienceUnitIds: [],
-    ...overrides,
-  };
-  return { id: noticeId, data: () => value };
-}
-
 beforeEach(() => {
   jest.resetAllMocks();
-});
-
-test('buyer feed subscription reads only the buyer feed path and applies live changes in feed order', () => {
-  const listeners: {
-    onNext?: (snapshot: { docs: ReturnType<typeof feedDoc>[] }) => void;
-    onError?: (error: unknown) => void;
-  } = {};
-  const unsubscribe = jest.fn();
-  mockCollection.mockReturnValue('feed-collection');
-  mockOnSnapshot.mockImplementation((_reference, onNext, onError) => {
-    listeners.onNext = onNext;
-    listeners.onError = onError;
-    return unsubscribe;
-  });
-
-  const onEntries = jest.fn();
-  const onError = jest.fn();
-  const stop = subscribeBuyerFeed(firestore, 'buyer-1', 'project-1', onEntries, onError);
-
-  expect(mockCollection).toHaveBeenCalledWith(firestore, 'users', 'buyer-1', 'feed');
-  expect(stop).toBe(unsubscribe);
-
-  listeners.onNext?.({
-    docs: [
-      feedDoc('older', { deliveredAt: timestampAt(1000) }),
-      feedDoc('pinned', { pinned: true, deliveredAt: timestampAt(500) }),
-      feedDoc('newer', { deliveredAt: timestampAt(2000) }),
-      feedDoc('other-project', { projectId: 'project-2' }),
-      feedDoc('wrong-uid', { uid: 'buyer-2' }),
-    ],
-  });
-
-  expect(onEntries).toHaveBeenCalledTimes(1);
-  expect((onEntries.mock.calls[0][0] as FeedEntryDoc[]).map((entry) => entry.noticeId)).toEqual([
-    'pinned',
-    'newer',
-    'older',
-  ]);
-  expect(
-    (onEntries.mock.calls[0][0] as FeedEntryDoc[]).every((entry) => entry.uid === 'buyer-1'),
-  ).toBe(true);
-
-  listeners.onNext?.({ docs: [feedDoc('fresh', { deliveredAt: timestampAt(3000) })] });
-  expect((onEntries.mock.calls[1][0] as FeedEntryDoc[]).map((entry) => entry.noticeId)).toEqual([
-    'fresh',
-  ]);
-
-  const failure = new Error('offline');
-  listeners.onError?.(failure);
-  expect(onError).toHaveBeenCalledWith(failure);
 });
 
 test('buyer unit loading validates the assigned unit and rejects another project or tower', async () => {
@@ -131,6 +60,7 @@ test('buyer unit loading validates the assigned unit and rejects another project
     updatedByUid: 'builder-1',
   };
   mockGetDoc.mockResolvedValue({ exists: true, id: 'unit-1', data: () => unitData });
+  (getDocs as jest.Mock).mockResolvedValue({ empty: true, docs: [] });
 
   const unit = await loadBuyerUnit(firestore, membership());
   expect(mockDoc).toHaveBeenCalledWith(firestore, 'projects', 'project-1', 'units', 'unit-1');

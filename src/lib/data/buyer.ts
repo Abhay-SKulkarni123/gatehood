@@ -1,20 +1,43 @@
-import { collection, doc, getDoc, getDocs, onSnapshot } from '@react-native-firebase/firestore';
+import {
+  collection,
+  doc,
+  getDoc,
+  limit as firestoreLimit,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+} from '@react-native-firebase/firestore';
 import type { Firestore } from '@react-native-firebase/firestore';
 import type { FeedEntryDoc, MembershipDoc, ProjectDoc } from '@/types/domain';
+import type { BuyerFeedSnapshot } from './feed-state';
+import { FEED_PAGE_SIZE } from './feed-state';
 import { isFeedEntryDoc, isProjectDoc } from './parse';
 import { sortBuyerFeed } from './sort';
 
-type FeedSnapshot = { docs: { id: string; data: () => unknown }[] };
+type FeedSnapshot = {
+  docs: { id: string; data: () => unknown }[];
+  metadata: { fromCache: boolean };
+};
+
+export type FeedListenerController = {
+  start: (requestedLimit: number) => void;
+  stop: () => void;
+};
 
 function feedEntriesFromSnapshot(
   snapshot: FeedSnapshot,
   uid: string,
   projectId: string,
 ): FeedEntryDoc[] {
-  return snapshot.docs.flatMap((document) => {
+  const entries = new Map<string, FeedEntryDoc>();
+  snapshot.docs.forEach((document) => {
     const value = document.data();
-    return isFeedEntryDoc(value, uid, document.id) && value.projectId === projectId ? [value] : [];
+    if (isFeedEntryDoc(value, uid, document.id) && value.projectId === projectId) {
+      entries.set(document.id, value);
+    }
   });
+  return sortBuyerFeed([...entries.values()]);
 }
 
 export async function loadBuyerProject(
@@ -30,29 +53,65 @@ export async function loadBuyerProject(
   return isProjectDoc(value, membership.projectId) ? value : null;
 }
 
-export async function loadBuyerFeed(
-  firestore: Firestore,
-  uid: string,
-  projectId: string,
-): Promise<FeedEntryDoc[]> {
-  const snapshot = await getDocs(collection(firestore, 'users', uid, 'feed'));
-  return sortBuyerFeed(feedEntriesFromSnapshot(snapshot, uid, projectId));
-}
-
 export function subscribeBuyerFeed(
   firestore: Firestore,
   uid: string,
   projectId: string,
-  onEntries: (entries: FeedEntryDoc[]) => void,
+  requestedLimit: number,
+  onResult: (snapshot: BuyerFeedSnapshot) => void,
   onError: (error: unknown) => void,
 ): () => void {
-  return onSnapshot(
+  const boundedLimit = Math.max(FEED_PAGE_SIZE, Math.floor(requestedLimit));
+  const feedQuery = query(
     collection(firestore, 'users', uid, 'feed'),
-    (snapshot) => {
-      onEntries(sortBuyerFeed(feedEntriesFromSnapshot(snapshot, uid, projectId)));
-    },
-    (error) => {
-      onError(error);
-    },
+    where('projectId', '==', projectId),
+    orderBy('pinned', 'desc'),
+    orderBy('deliveredAt', 'desc'),
+    firestoreLimit(boundedLimit),
   );
+
+  return onSnapshot(
+    feedQuery,
+    { includeMetadataChanges: true },
+    (snapshot) => {
+      onResult({
+        entries: feedEntriesFromSnapshot(snapshot, uid, projectId),
+        hasMore: snapshot.docs.length >= boundedLimit,
+        fromCache: snapshot.metadata.fromCache,
+      });
+    },
+    onError,
+  );
+}
+
+export function createFeedListenerController(
+  firestore: Firestore,
+  uid: string,
+  projectId: string,
+  onResult: (snapshot: BuyerFeedSnapshot) => void,
+  onError: (error: unknown) => void,
+): FeedListenerController {
+  let unsubscribe: (() => void) | null = null;
+
+  return {
+    start(requestedLimit) {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+      unsubscribe = subscribeBuyerFeed(
+        firestore,
+        uid,
+        projectId,
+        requestedLimit,
+        onResult,
+        onError,
+      );
+    },
+    stop() {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+      unsubscribe = null;
+    },
+  };
 }

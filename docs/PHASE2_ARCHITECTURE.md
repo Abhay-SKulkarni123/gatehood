@@ -100,7 +100,11 @@ Invite redemption reuses the authenticated `redeemInvite` callable. The client b
 
 Unit details are optional fields on `projects/{projectId}/units/{unitId}` so imported units remain valid. Only builders can update them through the App Check-enforced `updateUnitInfo` callable, which authorizes the caller's project, verifies the unit/tower, validates progress and date input, and writes a server timestamp. Buyers read only their assigned unit document; unavailable fields render as explicit unavailable states. Possession-day counts use calendar-day arithmetic, not a continuously changing countdown.
 
-Buyer notices use a realtime subscription to the caller's own `users/{uid}/feed` collection. All, My Tower, and My Unit filters run in memory on those delivered entries. Targeted filters require canonical audience metadata copied during fan-out; legacy entries without metadata are excluded from targeted filters. No client query can read another buyer's feed or a canonical notice directly.
+Buyer notices use a realtime subscription to the caller's own `users/{uid}/feed` collection. The query restricts `projectId` to the configured construction project, orders by `pinned` descending then `deliveredAt` descending, and uses a growing 15-document limit; Load more raises that limit by 15 and replaces the single active listener. A composite `COLLECTION` index on `feed` covers `projectId ASC`, `pinned DESC`, `deliveredAt DESC`. Snapshot documents are validated against the caller UID and project ID, deduplicated by notice ID, and sorted client-side. All, My Tower, and My Unit filters run in memory on those delivered entries. Targeted filters require canonical audience metadata copied during fan-out; legacy entries without metadata are excluded from targeted filters. Feed documents predating the required `pinned`/`deliveredAt` fields are not returned by the ordered query; no inference or synthetic ordering is attempted. No client query can read another buyer's feed or a canonical notice directly.
+
+Firestore native persistence is explicitly initialized with `persistence: true`. The feed listener requests metadata changes and labels cached snapshots from `metadata.fromCache`; there is no second AsyncStorage feed cache. Listener errors preserve already-loaded entries and expose retry. Auth or project changes reset the limit and feed state; ordinary realtime updates do not.
+
+Offline read actions are stored in AsyncStorage under a per-UID key, with each queued item carrying its project ID and notice ID. Queues are deduplicated, scoped to the active UID/project during replay, and replayed in bounded batches through the App Check-enforced `markNoticeRead` callable on connectivity restoration, app foreground, and authenticated session initialization. A module-level per-UID lock prevents concurrent replay. Successful or already-read callable responses remove the item; failed calls leave it pending. The UI distinguishes unread, Pending sync, and server-confirmed Read states, and does not treat locally queued reads as confirmed. Sign-out does not delete another user's queue.
 
 ## Notice fan-out and retries
 
@@ -150,7 +154,7 @@ Failed propagation records use the same failure collection with `kind: pin`. Par
 
 The single-document `readCount` counter on `projects/{projectId}/notices/{noticeId}` is retained. This is appropriate for the assignment's expected scale: reads are per buyer-notice pair, the feed document is the first-read gate, and no high-volume analytics are claimed.
 
-`markNoticeRead` runs a transaction on the caller's `users/{uid}/feed/{noticeId}` document and increments `readCount` only when `readAt` transitions from `null` to a timestamp. Transaction retries use the returned transaction result rather than mutable transaction-local state, and concurrent calls for the same buyer are covered by emulator tests.
+`markNoticeRead` runs a transaction on the caller's `users/{uid}/feed/{noticeId}` document and increments `readCount` only when `readAt` transitions from `null` to a timestamp. Transaction retries use the returned transaction result rather than mutable transaction-local state, and concurrent calls for the same buyer are covered by emulator tests. Offline replays call the same trusted callable, so an already-read response is equivalent to success without another counter increment; a temporary callable failure leaves the queue item pending and the feed read state unchanged.
 
 Limitation: all successful first reads for one notice serialize on the same canonical notice document. At much larger scale this becomes a Firestore write-contention hotspot; sharded counters or aggregation would be the next step. They are not introduced here.
 
@@ -180,4 +184,5 @@ Exact individual scripts are defined in root `package.json`.
 The following were deferred by Phase 2. Buyer CSV import, invite generation, builder read-status retrieval, and client feature screens/callable wrappers were later added in Phase 4.
 
 - Reconciliation jobs for terminal failures and counter drift.
-- Fully paginated UI for very large recipient lists; the current read-status endpoint returns a bounded sample.
+- Fully paginated UI for very large recipient lists; the current builder read-status endpoint returns a bounded sample.
+- Manual native-device verification of offline cache and connectivity replay; Phase 6 coverage is via Jest mocks and emulator tests.

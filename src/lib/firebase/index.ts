@@ -4,7 +4,10 @@ import {
   ReactNativeFirebaseAppCheckProvider,
 } from '@react-native-firebase/app-check';
 import { connectAuthEmulator, getAuth } from '@react-native-firebase/auth';
-import { connectFirestoreEmulator, getFirestore } from '@react-native-firebase/firestore';
+import {
+  connectFirestoreEmulator,
+  initializeFirestore,
+} from '@react-native-firebase/firestore';
 import { connectFunctionsEmulator, getFunctions } from '@react-native-firebase/functions';
 import { Platform } from 'react-native';
 import type { ClientConfig } from '@/config/env';
@@ -58,7 +61,7 @@ export function initializeFirebase(config: ClientConfig): FirebaseServices {
   const app = getApp();
   const appCheck = getAppCheck(app);
   const auth = getAuth(app);
-  const firestore = getFirestore(app);
+  const firestore = initializeFirestore(app, { persistence: true });
   const functions = getFunctions(app, config.functionsRegion);
 
   if (config.useFirebaseEmulator) {
