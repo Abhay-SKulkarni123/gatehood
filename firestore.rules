@@ -45,7 +45,7 @@ service cloud.firestore {
       }
 
       match /units/{unitId} {
-        allow read: if isMember(projectId);
+        allow read: if isRole(projectId, 'builder') || (isRole(projectId, 'buyer') && get(memberPath(projectId)).data.unitId == unitId);
         allow write: if false;
       }
 

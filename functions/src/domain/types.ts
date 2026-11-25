@@ -58,6 +58,11 @@ export interface UnitDoc {
   towerId: string;
   label: string;
   createdAt: FirestoreTimestamp;
+  configuration?: string | null;
+  constructionProgress?: number | null;
+  possessionDate?: FirestoreTimestamp | null;
+  updatedAt?: FirestoreTimestamp;
+  updatedByUid?: string | null;
 }
 
 export interface BuyerContactDoc {
@@ -130,6 +135,9 @@ export interface FeedEntryDoc {
   deliveredAt: FirestoreTimestamp;
   updatedAt: FirestoreTimestamp;
   readAt: FirestoreTimestamp | null;
+  audienceType?: AudienceType;
+  audienceTowerIds?: string[];
+  audienceUnitIds?: string[];
 }
 
 export interface FanoutFailureDoc {
@@ -187,6 +195,23 @@ export interface BuyerImportResult {
   complete: boolean;
 }
 
+export interface UpdateUnitInfoData {
+  projectId: string;
+  unitId: string;
+  configuration: string;
+  constructionProgress: number;
+  possessionDate: string;
+}
+
+export interface UpdateUnitInfoResult {
+  projectId: string;
+  unitId: string;
+  configuration: string;
+  constructionProgress: number;
+  possessionDate: string;
+  updatedAt: string;
+}
+
 export interface GenerateInviteData {
   projectId: string;
   towerId: string;
@@ -233,6 +258,7 @@ export interface NoticeReadStatusResult {
 
 export interface RedeemInviteData {
   code: string;
+  expectedProjectId?: string;
 }
 
 export interface RedeemInviteResult {

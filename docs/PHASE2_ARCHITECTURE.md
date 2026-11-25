@@ -19,7 +19,7 @@ All writes to these paths are privileged Admin SDK writes from Cloud Functions. 
 | `projects/{projectId}` | Construction project | `id`, `name`, `createdByUid`, `createdAt` |
 | `projects/{projectId}/members/{uid}` | Role and membership | Doc ID is Auth UID; `role: builder|buyer`, `towerId?`, `unitId?` |
 | `projects/{projectId}/towers/{towerId}` | Tower reference | `id`, `name`; imported IDs are deterministic from normalized name |
-| `projects/{projectId}/units/{unitId}` | Unit reference | `id`, `towerId`, `label`; imported IDs are deterministic from tower and normalized label |
+| `projects/{projectId}/units/{unitId}` | Unit reference | `id`, `towerId`, `label`; imported IDs are deterministic from tower and normalized label. Builder-maintained optional fields: `configuration`, `constructionProgress`, `possessionDate`, `updatedAt`, `updatedByUid` |
 | `projects/{projectId}/buyerContacts/{contactId}` | Builder-only imported contact detail | Doc ID is deterministic from normalized phone; `towerId`, `unitId`, `name`, `phone`, `importedByUid`, `importedAt`, `updatedAt` |
 | `projects/{projectId}/inviteSlots/{unitId}` | Per-unit invite idempotency slot | Doc ID is unit ID; stores current `codeHash`, `expiresAt`, `usedAt`, `revokedAt`; never readable or writable by clients |
 | `invites/{codeHash}` | Single-use invite | Doc ID is SHA-256 of normalized code; `codeHash`, `projectId`, `towerId`, `unitId`, `expiresAt`, `usedAt`, `usedByUid`, `revokedAt` |
@@ -32,7 +32,7 @@ Timestamps are Firestore `Timestamp` values except the retry lease, which uses e
 
 ### Feed document schema
 
-Every feed creation path writes exactly these fields:
+Every feed creation path writes these fields:
 
 ```text
 uid: string
@@ -44,7 +44,12 @@ pinned: boolean
 deliveredAt: Timestamp
 updatedAt: Timestamp
 readAt: Timestamp | null
+audienceType: 'project' | 'tower' | 'unit'
+audienceTowerIds: string[]
+audienceUnitIds: string[]
 ```
+
+Feed entries created before Phase 5 may omit the three audience fields. Parsers accept those legacy entries so existing deliveries remain readable; targeted buyer filters hide entries with unknown audience metadata instead of guessing. New fan-out and updates write audience fields from the canonical notice.
 
 `readAt` is written as `null` on creation and only changed by `markNoticeRead`. Pin propagation updates only `pinned` and `updatedAt`. Fan-out updates `title`, `body`, `pinned`, and `updatedAt` when canonical mutable fields change. Pin queries use both `noticeId` and `projectId`; the recipient UID is derived from the `users/{uid}/feed/{noticeId}` path, not the stored `uid` field, so malformed or stale feed fields cannot redirect propagation. `markNoticeRead` validates both fields against the caller's feed document.
 
@@ -61,6 +66,7 @@ All callables are Firebase Functions v2 `onCall` handlers in the configured regi
 | `setNoticePinned` | Authorize builder, update canonical notice pinned state, then idempotently propagate to feed entries |
 | `markNoticeRead` | Authorize buyer, verify own feed entry, set first `readAt`, and increment canonical `readCount` once |
 | `getNoticeReadStatus` | Authorize builder and return canonical totals plus paginated, audience-filtered recipient samples |
+| `updateUnitInfo` | Authorize builder, validate `configuration`, progress `0–100`, and a `YYYY-MM-DD` possession date, then update that project's unit |
 
 Internal fan-out and retry helpers are not callable endpoints.
 
@@ -70,7 +76,8 @@ Internal fan-out and retry helpers are not callable endpoints.
 2. Reject strings that are not 12-64 alphanumeric characters.
 3. Compute SHA-256 hex hash. The hash is the invite document ID and `codeHash` field; plaintext is never stored or logged.
 4. In one transaction on `invites/{codeHash}`:
-   - verify project, tower, and unit exist, and for unit references parse the referenced tower and verify it belongs to the same project;
+   - when the caller supplies `expectedProjectId`, reject an invite from a different project before creating membership;
+   - verify project, tower, and unit exist, and parse the referenced tower and unit to verify they belong to the same project;
    - verify expiry and unused state;
    - if the caller already has a membership, allow retry only when the invite was used by the same UID;
    - create `members/{uid}` with role `buyer`;
@@ -86,6 +93,14 @@ Invalid, expired, revoked, and already-used codes return the same safe `invalid-
 ## Invite generation
 
 `generateInvite` uses a transactional slot per unit. Without `regenerate`, repeated calls return the existing active invite with `code: null` and `codeAvailable: false`; plaintext is deliberately not recoverable because only a hash is stored. With `regenerate: true`, the previous active invite is marked `revokedAt` in the same transaction that creates the new invite and slot, so the old code fails redemption immediately. Random-code collisions are retried with a fixed attempt bound.
+
+## Buyer experience completion
+
+Invite redemption reuses the authenticated `redeemInvite` callable. The client blocks duplicate submissions while a redeem call is in flight, validates empty/malformed codes locally, distinguishes safe invalid/expired/used errors from retryable network errors, and calls `retry()` on `MembershipProvider` after a successful redemption. Same-user redemption remains idempotent; a cross-project code is rejected when the client-supplied expected project does not match the invite.
+
+Unit details are optional fields on `projects/{projectId}/units/{unitId}` so imported units remain valid. Only builders can update them through the App Check-enforced `updateUnitInfo` callable, which authorizes the caller's project, verifies the unit/tower, validates progress and date input, and writes a server timestamp. Buyers read only their assigned unit document; unavailable fields render as explicit unavailable states. Possession-day counts use calendar-day arithmetic, not a continuously changing countdown.
+
+Buyer notices use a realtime subscription to the caller's own `users/{uid}/feed` collection. All, My Tower, and My Unit filters run in memory on those delivered entries. Targeted filters require canonical audience metadata copied during fan-out; legacy entries without metadata are excluded from targeted filters. No client query can read another buyer's feed or a canonical notice directly.
 
 ## Notice fan-out and retries
 
@@ -145,7 +160,7 @@ Limitation: all successful first reads for one notice serialize on the same cano
 
 ## Security rules
 
-Rules default-deny, require authentication, and derive authorization from membership documents in the path's project. Buyers can read only their own user/feed documents. Builders can read only their authorized project's supporting data, including `buyerContacts`; buyers cannot read those contact documents. `projects/{projectId}/inviteSlots/{unitId}` and top-level `invites/{codeHash}` are never readable or writable by clients. All notice, invite, membership, role, counter, failure, contact, and client feed writes from clients are denied. Admin SDK operations bypass rules and are authorized inside Functions.
+Rules default-deny, require authentication, and derive authorization from membership documents in the path's project. Buyers can read only their own user/feed documents and their assigned unit document. Builders can read all supporting data in their authorized project, including `buyerContacts`; buyers cannot read those contact documents. `projects/{projectId}/inviteSlots/{unitId}` and top-level `invites/{codeHash}` are never readable or writable by clients. All notice, invite, membership, role, counter, failure, contact, and client feed writes from clients are denied. Admin SDK operations bypass rules and are authorized inside Functions.
 
 ## Emulator testing
 

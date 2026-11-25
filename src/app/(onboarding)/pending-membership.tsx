@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { ErrorState } from '@/components/error-state';
 import { FormField } from '@/components/form-field';
@@ -7,6 +7,7 @@ import { Screen } from '@/components/screen';
 import { getClientConfig } from '@/config/env';
 import { callRedeemInvite, describeCallableError } from '@/lib/functions';
 import { getFirebaseServices } from '@/lib/firebase';
+import { createRedemptionGate, describeInviteCodeInput } from '@/lib/invite/redemption';
 import { useAuth } from '@/providers/auth-provider';
 import { useMembership } from '@/providers/membership-provider';
 import { colors, spacing, typography } from '@/theme';
@@ -16,23 +17,46 @@ export default function PendingMembershipScreen() {
   const { retry } = useMembership();
   const { functions } = getFirebaseServices();
   const { constructionProjectId } = getClientConfig();
+  const redemptionGate = useRef(createRedemptionGate()).current;
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const codeError = code.trim().length > 0 ? describeInviteCodeInput(code) : null;
 
   const handleRedeem = async () => {
+    if (redemptionGate.isBusy()) {
+      return;
+    }
+    const inputError = describeInviteCodeInput(code);
+    if (inputError) {
+      setError(inputError);
+      return;
+    }
+    const prepared = redemptionGate.begin(code);
+    if (!prepared) {
+      return;
+    }
+
     setBusy(true);
     setError(null);
     setMessage(null);
     try {
-      const result = await callRedeemInvite(functions, { code: code.trim() });
+      const result = await callRedeemInvite(functions, {
+        code: prepared.code,
+        expectedProjectId: constructionProjectId,
+      });
       setCode('');
-      setMessage(`Joined ${result.projectId}. Opening your workspace…`);
+      setMessage(
+        result.alreadyMember
+          ? `You already have access to ${result.projectId}. Opening your workspace…`
+          : `Joined ${result.projectId}. Opening your workspace…`,
+      );
       retry();
     } catch (redeemError) {
       setError(describeCallableError(redeemError));
     } finally {
+      redemptionGate.finish();
       setBusy(false);
     }
   };
@@ -48,15 +72,23 @@ export default function PendingMembershipScreen() {
         </Text>
         <Text style={styles.account}>Signed in as {user?.email ?? user?.uid ?? 'your account'}</Text>
         <FormField
+          error={codeError}
           label="Invite code"
           onChangeText={setCode}
           placeholder="Enter the code from your builder"
           value={code}
         />
         {message ? <Text accessibilityRole="status" style={styles.success}>{message}</Text> : null}
-        {error ? <ErrorState message={error} title="Invite redemption failed" /> : null}
+        {error ? (
+          <ErrorState
+            message={error}
+            onRetry={() => void handleRedeem()}
+            retryLabel="Try redeeming again"
+            title="Invite redemption failed"
+          />
+        ) : null}
         <PrimaryButton
-          disabled={!code.trim()}
+          disabled={busy}
           label="Redeem invite"
           loading={busy}
           onPress={() => void handleRedeem()}

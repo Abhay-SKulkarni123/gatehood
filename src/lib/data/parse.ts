@@ -40,6 +40,26 @@ function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
+function isProgressNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100;
+}
+
+function isOptionalNullableString(value: unknown): value is string | null | undefined {
+  return value === undefined || isNullableNonEmptyString(value);
+}
+
+function isOptionalProgress(value: unknown): value is number | null | undefined {
+  return value === undefined || value === null || isProgressNumber(value);
+}
+
+function isOptionalTimestamp(value: unknown): value is FirestoreTimestamp | null | undefined {
+  return value === undefined || value === null || isFirestoreTimestamp(value);
+}
+
+function isOptionalStringArray(value: unknown): value is string[] | undefined {
+  return value === undefined || isStringArray(value);
+}
+
 export function isProjectDoc(value: unknown, id: string): value is ProjectDoc {
   if (!isRecord(value)) {
     return false;
@@ -73,7 +93,12 @@ export function isUnitDoc(value: unknown, id: string): value is UnitDoc {
     isNonEmptyString(value.projectId) &&
     isNonEmptyString(value.towerId) &&
     isNonEmptyString(value.label) &&
-    isFirestoreTimestamp(value.createdAt)
+    isFirestoreTimestamp(value.createdAt) &&
+    isOptionalNullableString(value.configuration) &&
+    isOptionalProgress(value.constructionProgress) &&
+    isOptionalTimestamp(value.possessionDate) &&
+    isOptionalTimestamp(value.updatedAt) &&
+    isOptionalNullableString(value.updatedByUid)
   );
 }
 
@@ -132,7 +157,10 @@ export function isFeedEntryDoc(value: unknown, uid: string, noticeId: string): v
     typeof value.pinned === 'boolean' &&
     isFirestoreTimestamp(value.deliveredAt) &&
     isFirestoreTimestamp(value.updatedAt) &&
-    (value.readAt === null || isFirestoreTimestamp(value.readAt))
+    (value.readAt === null || isFirestoreTimestamp(value.readAt)) &&
+    (value.audienceType === undefined || ['project', 'tower', 'unit'].includes(String(value.audienceType))) &&
+    isOptionalStringArray(value.audienceTowerIds) &&
+    isOptionalStringArray(value.audienceUnitIds)
   );
 }
 

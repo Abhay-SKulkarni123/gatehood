@@ -15,6 +15,8 @@ import type {
   BuyerImportResult,
   SetNoticePinnedData,
   SetNoticePinnedResult,
+  UpdateUnitInfoData,
+  UpdateUnitInfoResult,
 } from '@/types/domain';
 
 async function invoke<Request, Response>(
@@ -76,4 +78,11 @@ export function callGetNoticeReadStatus(
   data: NoticeReadStatusData,
 ): Promise<NoticeReadStatusResult> {
   return invoke<NoticeReadStatusData, NoticeReadStatusResult>(functions, 'getNoticeReadStatus', data);
+}
+
+export function callUpdateUnitInfo(
+  functions: Functions,
+  data: UpdateUnitInfoData,
+): Promise<UpdateUnitInfoResult> {
+  return invoke<UpdateUnitInfoData, UpdateUnitInfoResult>(functions, 'updateUnitInfo', data);
 }

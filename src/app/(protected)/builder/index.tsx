@@ -16,6 +16,7 @@ import {
 } from '@/lib/csv/buyer-import';
 import type { BuilderSnapshot } from '@/lib/data/builder';
 import { loadBuilderSnapshot } from '@/lib/data/builder';
+import { isValidPossessionDateInput, possessionDateToIsoDate } from '@/lib/data/units';
 import {
   describeCallableError,
   callCreateNotice,
@@ -23,6 +24,7 @@ import {
   callGetNoticeReadStatus,
   callImportBuyers,
   callSetNoticePinned,
+  callUpdateUnitInfo,
 } from '@/lib/functions';
 import { getFirebaseServices } from '@/lib/firebase';
 import { useAuth } from '@/providers/auth-provider';
@@ -33,11 +35,28 @@ import type {
   NoticeAudience,
   NoticeDoc,
   NoticeReadStatusResult,
+  UnitDoc,
 } from '@/types/domain';
 import { colors, radius, spacing, typography } from '@/theme';
 import { parseIdList } from '@/utils/identifiers';
 
 type NoticeAudienceType = NoticeAudience['type'];
+
+type UnitInfoDraft = {
+  configuration: string;
+  constructionProgress: string;
+  possessionDate: string;
+};
+
+function draftForUnit(unit: UnitDoc): UnitInfoDraft {
+  return {
+    configuration: unit.configuration ?? '',
+    constructionProgress: unit.constructionProgress === undefined || unit.constructionProgress === null
+      ? ''
+      : String(unit.constructionProgress),
+    possessionDate: possessionDateToIsoDate(unit.possessionDate) ?? '',
+  };
+}
 
 function formatTimestamp(value: FirestoreTimestamp | string): string {
   if (typeof value === 'string') {
@@ -76,6 +95,7 @@ export default function BuilderHomeScreen() {
   const [audienceType, setAudienceType] = useState<NoticeAudienceType>('project');
   const [audienceIds, setAudienceIds] = useState('');
   const [readStatus, setReadStatus] = useState<NoticeReadStatusResult | null>(null);
+  const [unitInfoDrafts, setUnitInfoDrafts] = useState<Record<string, UnitInfoDraft>>({});
 
   const load = async (showLoading: boolean) => {
     if (showLoading) {
@@ -168,6 +188,59 @@ export default function BuilderHomeScreen() {
     }
     return grouped;
   }, [snapshot]);
+
+  const currentDraftForUnit = (unit: UnitDoc): UnitInfoDraft =>
+    unitInfoDrafts[unit.id] ?? draftForUnit(unit);
+
+  const updateUnitInfoDraft = (unit: UnitDoc, field: keyof UnitInfoDraft, value: string) => {
+    setUnitInfoDrafts((current) => ({
+      ...current,
+      [unit.id]: { ...(current[unit.id] ?? draftForUnit(unit)), [field]: value },
+    }));
+  };
+
+  const handleUpdateUnitInfo = async (unit: UnitDoc) => {
+    const draft = currentDraftForUnit(unit);
+    const constructionProgress = Number(draft.constructionProgress.trim());
+    const configuration = draft.configuration.trim();
+    const possessionDate = draft.possessionDate.trim();
+    if (
+      !configuration ||
+      !Number.isInteger(constructionProgress) ||
+      constructionProgress < 0 ||
+      constructionProgress > 100 ||
+      !isValidPossessionDateInput(possessionDate)
+    ) {
+      setError(
+        'Enter configuration, progress from 0 to 100, and a valid possession date (YYYY-MM-DD).',
+      );
+      return;
+    }
+
+    const result = await runAction(
+      `unit-info:${unit.id}`,
+      () =>
+        callUpdateUnitInfo(getFirebaseServices().functions, {
+          projectId: constructionProjectId,
+          unitId: unit.id,
+          configuration,
+          constructionProgress,
+          possessionDate,
+        }),
+      `Updated details for ${unit.label}.`,
+    );
+    if (!result) {
+      return;
+    }
+    setUnitInfoDrafts((current) => ({
+      ...current,
+      [unit.id]: {
+        configuration: result.configuration,
+        constructionProgress: String(result.constructionProgress),
+        possessionDate: result.possessionDate,
+      },
+    }));
+  };
 
   const applyCsv = (value: string, fileName: string | null = null) => {
     const nextState = createBuyerCsvState(value, fileName);
@@ -470,7 +543,7 @@ export default function BuilderHomeScreen() {
             <Text style={styles.helper}>
               Generate a single-use code for a unit. Repeated calls reuse the active invite; its
               code cannot be recovered after a lost response. Replacing an invite revokes the
-              previous code immediately.
+              previous code immediately. Saved unit details are shown to the assigned buyer.
             </Text>
             {snapshot.units.length === 0 ? (
               <EmptyState message="Import buyers to create units before generating invites." title="No units yet" />
@@ -481,52 +554,85 @@ export default function BuilderHomeScreen() {
                 const contactLabel = contacts
                   .map((contact) => `${contact.name} (${contact.phone})`)
                   .join('; ');
+                const draft = currentDraftForUnit(unit);
                 return (
                   <View key={unit.id} style={styles.unitRow}>
-                    <View style={styles.unitInfo}>
-                      <Text style={styles.rowTitle}>{unit.label}</Text>
-                      <Text style={styles.rowDetail}>
-                        {towerNames.get(unit.towerId) ?? unit.towerId} · {unit.id}
-                      </Text>
-                      <Text style={buyer ? styles.joined : styles.awaiting}>
-                        {buyer ? `Joined as ${buyer.uid}` : 'Not joined'}
-                      </Text>
-                      {contactLabel ? (
-                        <Text style={styles.rowDetail}>Imported: {contactLabel}</Text>
-                      ) : null}
+                    <View style={styles.unitRowHeader}>
+                      <View style={styles.unitInfo}>
+                        <Text style={styles.rowTitle}>{unit.label}</Text>
+                        <Text style={styles.rowDetail}>
+                          {towerNames.get(unit.towerId) ?? unit.towerId} · {unit.id}
+                        </Text>
+                        <Text style={buyer ? styles.joined : styles.awaiting}>
+                          {buyer ? `Joined as ${buyer.uid}` : 'Not joined'}
+                        </Text>
+                        {contactLabel ? (
+                          <Text style={styles.rowDetail}>Imported: {contactLabel}</Text>
+                        ) : null}
+                      </View>
+                      <View style={styles.inviteActions}>
+                        <Pressable
+                          accessibilityLabel={`Generate invite for ${unit.label}`}
+                          accessibilityRole="button"
+                          disabled={busy !== null}
+                          onPress={() => void handleGenerateInvite(unit.towerId, unit.id)}
+                          style={({ pressed }) => [
+                            styles.inviteButton,
+                            busy !== null ? styles.buttonDisabled : null,
+                            pressed ? styles.pressed : null,
+                          ]}
+                        >
+                          <Text style={styles.inviteButtonLabel}>
+                            {busy === `invite:${unit.id}` ? 'Working…' : 'Invite'}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          accessibilityLabel={`Replace invite for ${unit.label}`}
+                          accessibilityRole="button"
+                          disabled={busy !== null}
+                          onPress={() => void handleGenerateInvite(unit.towerId, unit.id, true)}
+                          style={({ pressed }) => [
+                            styles.inviteButton,
+                            styles.replaceButton,
+                            busy !== null ? styles.buttonDisabled : null,
+                            pressed ? styles.pressed : null,
+                          ]}
+                        >
+                          <Text style={[styles.inviteButtonLabel, styles.replaceButtonLabel]}>
+                            {busy === `replace-invite:${unit.id}` ? 'Working…' : 'Replace'}
+                          </Text>
+                        </Pressable>
+                      </View>
                     </View>
-                    <View style={styles.inviteActions}>
-                      <Pressable
-                        accessibilityLabel={`Generate invite for ${unit.label}`}
-                        accessibilityRole="button"
+                    <View style={styles.unitInfoForm}>
+                      <Text style={styles.rowDetail}>Unit details</Text>
+                      <FormField
+                        label={`${unit.label} configuration`}
+                        onChangeText={(value) => updateUnitInfoDraft(unit, 'configuration', value)}
+                        placeholder="Not available yet"
+                        value={draft.configuration}
+                      />
+                      <FormField
+                        keyboardType="numeric"
+                        label={`${unit.label} construction progress`}
+                        onChangeText={(value) =>
+                          updateUnitInfoDraft(unit, 'constructionProgress', value)
+                        }
+                        placeholder="0 to 100"
+                        value={draft.constructionProgress}
+                      />
+                      <FormField
+                        label={`${unit.label} possession date`}
+                        onChangeText={(value) => updateUnitInfoDraft(unit, 'possessionDate', value)}
+                        placeholder="YYYY-MM-DD"
+                        value={draft.possessionDate}
+                      />
+                      <PrimaryButton
                         disabled={busy !== null}
-                        onPress={() => void handleGenerateInvite(unit.towerId, unit.id)}
-                        style={({ pressed }) => [
-                          styles.inviteButton,
-                          busy !== null ? styles.buttonDisabled : null,
-                          pressed ? styles.pressed : null,
-                        ]}
-                      >
-                        <Text style={styles.inviteButtonLabel}>
-                          {busy === `invite:${unit.id}` ? 'Working…' : 'Invite'}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityLabel={`Replace invite for ${unit.label}`}
-                        accessibilityRole="button"
-                        disabled={busy !== null}
-                        onPress={() => void handleGenerateInvite(unit.towerId, unit.id, true)}
-                        style={({ pressed }) => [
-                          styles.inviteButton,
-                          styles.replaceButton,
-                          busy !== null ? styles.buttonDisabled : null,
-                          pressed ? styles.pressed : null,
-                        ]}
-                      >
-                        <Text style={[styles.inviteButtonLabel, styles.replaceButtonLabel]}>
-                          {busy === `replace-invite:${unit.id}` ? 'Working…' : 'Replace'}
-                        </Text>
-                      </Pressable>
+                        label="Save unit details"
+                        loading={busy === `unit-info:${unit.id}`}
+                        onPress={() => void handleUpdateUnitInfo(unit)}
+                      />
                     </View>
                   </View>
                 );
@@ -765,18 +871,27 @@ const styles = StyleSheet.create({
     color: colors.danger,
   },
   unitRow: {
-    alignItems: 'flex-start',
     borderColor: colors.border,
     borderRadius: radius.md,
     borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  unitRowHeader: {
+    alignItems: 'flex-start',
     flexDirection: 'row',
     gap: spacing.md,
     justifyContent: 'space-between',
-    padding: spacing.md,
   },
   unitInfo: {
     flexShrink: 1,
     gap: spacing.xs,
+  },
+  unitInfoForm: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    gap: spacing.sm,
+    paddingTop: spacing.md,
   },
   rowTitle: {
     ...typography.body,

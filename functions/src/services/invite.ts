@@ -182,6 +182,9 @@ export async function redeemInvite(
     if (invite.codeHash !== codeHash) {
       throw invalidInvite();
     }
+    if (data.expectedProjectId !== undefined && invite.projectId !== data.expectedProjectId) {
+      throw invalidInvite();
+    }
     if (invite.expiresAt.toMillis() <= now.toMillis()) {
       throw invalidInvite();
     }
@@ -199,9 +202,13 @@ export async function redeemInvite(
     const towerSnapshot = await transaction.get(db.doc(paths.tower(invite.projectId, invite.towerId)));
     const unitSnapshot = await transaction.get(db.doc(paths.unit(invite.projectId, invite.unitId)));
     parseDocument(projectSnapshot, parseProject, invite.projectId);
-    parseDocument(towerSnapshot, parseTower, invite.towerId);
+    const tower = parseDocument(towerSnapshot, parseTower, invite.towerId);
     const unit = parseDocument(unitSnapshot, parseUnit, invite.unitId);
-    if (unit.towerId !== invite.towerId) {
+    if (
+      tower.projectId !== invite.projectId ||
+      unit.projectId !== invite.projectId ||
+      unit.towerId !== invite.towerId
+    ) {
       throw invalidInvite();
     }
 

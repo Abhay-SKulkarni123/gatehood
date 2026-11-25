@@ -18,12 +18,14 @@ import type {
   SetNoticePinnedData,
   TowerDoc,
   UnitDoc,
+  UpdateUnitInfoData,
 } from './domain/types';
 import { invalidPayload } from './errors';
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const INVITE_CODE_PATTERN = /^[A-Z0-9]{12,64}$/;
 const PHONE_INPUT_PATTERN = /^\+?[0-9\s().-]{7,24}$/;
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const idSchema = z.string().trim().min(1).max(100).regex(SLUG_PATTERN);
 const slugSchema = z.string().trim().min(1).max(100).regex(SLUG_PATTERN);
@@ -86,9 +88,26 @@ const noticeAudienceSchema = z.discriminatedUnion('type', [
     .strict(),
 ]);
 
+const POSSESSION_DATE_ERROR = 'Possession date must be a valid YYYY-MM-DD date.';
+
+const possessionDateSchema = z
+  .string()
+  .trim()
+  .regex(ISO_DATE_PATTERN, POSSESSION_DATE_ERROR)
+  .refine((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
+    );
+  }, POSSESSION_DATE_ERROR);
+
 const redeemInviteSchema = z
   .object({
     code: inviteCodeSchema,
+    expectedProjectId: slugSchema.optional(),
   })
   .strict();
 
@@ -113,6 +132,16 @@ const markNoticeReadSchema = z
   .object({
     projectId: slugSchema,
     noticeId: slugSchema,
+  })
+  .strict();
+
+const updateUnitInfoSchema = z
+  .object({
+    projectId: slugSchema,
+    unitId: idSchema,
+    configuration: z.string().trim().min(1).max(120),
+    constructionProgress: z.number().int().min(0).max(100),
+    possessionDate: possessionDateSchema,
   })
   .strict();
 
@@ -178,6 +207,11 @@ const unitDocSchema = z
     towerId: idSchema,
     label: z.string().min(1).max(120),
     createdAt: timestampSchema,
+    configuration: z.string().min(1).max(120).nullable().optional(),
+    constructionProgress: z.number().int().min(0).max(100).nullable().optional(),
+    possessionDate: timestampSchema.nullable().optional(),
+    updatedAt: timestampSchema.optional(),
+    updatedByUid: z.string().min(1).max(128).nullable().optional(),
   })
   .strict();
 
@@ -260,6 +294,9 @@ const feedEntryDocSchema = z
     deliveredAt: timestampSchema,
     updatedAt: timestampSchema,
     readAt: nullableTimestampSchema,
+    audienceType: z.enum(['project', 'tower', 'unit']).optional(),
+    audienceTowerIds: z.array(idSchema).max(200).optional(),
+    audienceUnitIds: z.array(idSchema).max(200).optional(),
   })
   .strict();
 
@@ -320,6 +357,14 @@ export function parseMarkNoticeRead(value: unknown): MarkNoticeReadData {
 
 export function parseBuyerImport(value: unknown): BuyerImportData {
   const result = buyerImportSchema.safeParse(value);
+  if (!result.success) {
+    throw invalidPayload();
+  }
+  return result.data;
+}
+
+export function parseUpdateUnitInfo(value: unknown): UpdateUnitInfoData {
+  const result = updateUnitInfoSchema.safeParse(value);
   if (!result.success) {
     throw invalidPayload();
   }

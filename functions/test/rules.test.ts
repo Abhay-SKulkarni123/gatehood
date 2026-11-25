@@ -117,6 +117,25 @@ describe('Firestore security rules', () => {
     );
   });
 
+  it('allows buyers to read their assigned unit but not other units', async () => {
+    const buyerDb = testEnv.authenticatedContext(BUYER_ONE_UID).firestore();
+    const builderDb = testEnv.authenticatedContext(BUILDER_UID).firestore();
+    await assertSucceeds(buyerDb.doc(paths.unit(PROJECT_ID, 'unit-1')).get());
+    await assertFails(buyerDb.doc(paths.unit(PROJECT_ID, 'unit-2')).get());
+    await assertSucceeds(builderDb.doc(paths.unit(PROJECT_ID, 'unit-2')).get());
+  });
+
+  it('denies client writes to unit details', async () => {
+    const buyerDb = testEnv.authenticatedContext(BUYER_ONE_UID).firestore();
+    const builderDb = testEnv.authenticatedContext(BUILDER_UID).firestore();
+    await assertFails(
+      buyerDb.doc(paths.unit(PROJECT_ID, 'unit-1')).update({ configuration: 'Client write' }),
+    );
+    await assertFails(
+      builderDb.doc(paths.unit(PROJECT_ID, 'unit-1')).update({ constructionProgress: 100 }),
+    );
+  });
+
   it('denies all client access to invite documents and invite slots', async () => {
     const builderDb = testEnv.authenticatedContext(BUILDER_UID).firestore();
     const buyerDb = testEnv.authenticatedContext(BUYER_ONE_UID).firestore();

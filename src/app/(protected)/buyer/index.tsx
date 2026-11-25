@@ -1,17 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { ChoiceChip } from '@/components/choice-chip';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { LoadingIndicator } from '@/components/loading-indicator';
 import { PrimaryButton } from '@/components/primary-button';
 import { Screen } from '@/components/screen';
 import { getClientConfig } from '@/config/env';
-import { loadBuyerFeed } from '@/lib/data/buyer';
+import { subscribeBuyerFeed } from '@/lib/data/buyer';
+import {
+  describeConstructionProgress,
+  describePossessionDate,
+  loadBuyerUnit,
+} from '@/lib/data/units';
+import { filterBuyerFeed, type BuyerFeedFilter } from '@/lib/data/sort';
 import { callMarkNoticeRead, describeCallableError } from '@/lib/functions';
 import { getFirebaseServices } from '@/lib/firebase';
 import { useAuth } from '@/providers/auth-provider';
 import { useMembership } from '@/providers/membership-provider';
-import type { FeedEntryDoc, FirestoreTimestamp } from '@/types/domain';
+import type { FeedEntryDoc, FirestoreTimestamp, UnitDoc } from '@/types/domain';
 import { colors, radius, spacing, typography } from '@/theme';
 
 function formatTimestamp(value: FirestoreTimestamp): string {
@@ -27,46 +34,67 @@ export default function BuyerHomeScreen() {
   const [entries, setEntries] = useState<FeedEntryDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [feedRetryKey, setFeedRetryKey] = useState(0);
+  const [feedFilter, setFeedFilter] = useState<BuyerFeedFilter>('all');
+  const [unit, setUnit] = useState<UnitDoc | null>(null);
+  const [unitLoading, setUnitLoading] = useState(true);
+  const [unitError, setUnitError] = useState<string | null>(null);
   const [busyNoticeId, setBusyNoticeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadFeed = async (showLoading: boolean) => {
-    if (!uid) {
-      return;
-    }
-    if (showLoading) {
-      setLoading(true);
-    }
-    setLoadError(null);
-    try {
-      const { firestore } = getFirebaseServices();
-      setEntries(await loadBuyerFeed(firestore, uid, constructionProjectId));
-    } catch (feedError) {
-      setLoadError(describeCallableError(feedError));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const membershipRecord = membership.status === 'ready' ? membership.membership : null;
 
   useEffect(() => {
     if (!uid) {
       return;
     }
+    try {
+      const { firestore } = getFirebaseServices();
+      return subscribeBuyerFeed(
+        firestore,
+        uid,
+        constructionProjectId,
+        (data) => {
+          setEntries(data);
+          setLoading(false);
+        },
+        (feedError) => {
+          setLoadError(describeCallableError(feedError));
+          setLoading(false);
+        },
+      );
+    } catch (feedError) {
+      const message = describeCallableError(feedError);
+      void Promise.resolve().then(() => {
+        setLoadError(message);
+        setLoading(false);
+      });
+      return undefined;
+    }
+  }, [constructionProjectId, uid, feedRetryKey]);
+
+  useEffect(() => {
+    if (!membershipRecord) {
+      return;
+    }
+
     let active = true;
     const run = async () => {
+      setUnitLoading(true);
+      setUnitError(null);
       try {
         const { firestore } = getFirebaseServices();
-        const data = await loadBuyerFeed(firestore, uid, constructionProjectId);
+        const data = await loadBuyerUnit(firestore, membershipRecord);
         if (active) {
-          setEntries(data);
+          setUnit(data);
         }
-      } catch (feedError) {
+      } catch (unitLoadError) {
         if (active) {
-          setLoadError(describeCallableError(feedError));
+          setUnitError(describeCallableError(unitLoadError));
         }
       } finally {
         if (active) {
-          setLoading(false);
+          setUnitLoading(false);
         }
       }
     };
@@ -74,7 +102,12 @@ export default function BuyerHomeScreen() {
     return () => {
       active = false;
     };
-  }, [constructionProjectId, uid]);
+  }, [membershipRecord]);
+
+  const filteredEntries = useMemo(
+    () => filterBuyerFeed(entries, membershipRecord, feedFilter),
+    [entries, membershipRecord, feedFilter],
+  );
 
   const handleMarkRead = async (noticeId: string) => {
     setBusyNoticeId(noticeId);
@@ -84,15 +117,12 @@ export default function BuyerHomeScreen() {
         projectId: constructionProjectId,
         noticeId,
       });
-      await loadFeed(false);
     } catch (readError) {
       setError(describeCallableError(readError));
     } finally {
       setBusyNoticeId(null);
     }
   };
-
-  const membershipRecord = membership.status === 'ready' ? membership.membership : null;
 
   return (
     <Screen>
@@ -113,24 +143,72 @@ export default function BuyerHomeScreen() {
           <Text style={styles.detail}>Project: {membershipRecord.projectId}</Text>
           <Text style={styles.detail}>Tower: {membershipRecord.towerId ?? 'Not assigned'}</Text>
           <Text style={styles.detail}>Unit: {membershipRecord.unitId ?? 'Not assigned'}</Text>
+          {unitLoading ? (
+            <LoadingIndicator label="Loading unit details…" />
+          ) : unitError ? (
+            <ErrorState message={unitError} title="Unit details unavailable" />
+          ) : (
+            <>
+              <Text style={styles.detail}>
+                Configuration: {unit?.configuration ?? 'Not available'}
+              </Text>
+              <Text style={styles.detail}>
+                Construction: {describeConstructionProgress(unit?.constructionProgress)}
+              </Text>
+              <Text style={styles.detail}>{describePossessionDate(unit?.possessionDate)}</Text>
+              {unit === null ? (
+                <Text style={styles.detail}>Your builder has not added these details yet.</Text>
+              ) : null}
+            </>
+          )}
         </View>
       ) : null}
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Notices</Text>
+        <View style={styles.chipRow}>
+          <ChoiceChip
+            label="All"
+            onPress={() => setFeedFilter('all')}
+            selected={feedFilter === 'all'}
+          />
+          <ChoiceChip
+            label="My tower"
+            onPress={() => setFeedFilter('tower')}
+            selected={feedFilter === 'tower'}
+          />
+          <ChoiceChip
+            label="My unit"
+            onPress={() => setFeedFilter('unit')}
+            selected={feedFilter === 'unit'}
+          />
+        </View>
         {loading ? (
           <LoadingIndicator label="Loading notices…" />
         ) : loadError ? (
           <ErrorState
             message={loadError}
-            onRetry={() => void loadFeed(true)}
+            onRetry={() => {
+              setLoading(true);
+              setLoadError(null);
+              setFeedRetryKey((value) => value + 1);
+            }}
             retryLabel="Reload notices"
             title="Notices unavailable"
           />
-        ) : entries.length === 0 ? (
-          <EmptyState message="Your builder has not published a notice for this unit yet." title="No notices" />
+        ) : filteredEntries.length === 0 ? (
+          <EmptyState
+            message={
+              feedFilter === 'tower'
+                ? 'No notices are targeted to your tower or unit yet.'
+                : feedFilter === 'unit'
+                  ? 'No notices are targeted to your unit yet.'
+                  : 'Your builder has not published a notice for this unit yet.'
+            }
+            title="No notices"
+          />
         ) : (
-          entries.map((entry) => (
+          filteredEntries.map((entry) => (
             <View key={entry.noticeId} style={styles.notice}>
               <View style={styles.noticeHeader}>
                 <Text style={styles.noticeTitle}>{entry.title}</Text>
@@ -185,6 +263,11 @@ const styles = StyleSheet.create({
   sectionTitle: {
     ...typography.heading,
     color: colors.text,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
   detail: {
     ...typography.caption,

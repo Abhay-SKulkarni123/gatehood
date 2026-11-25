@@ -102,6 +102,9 @@ async function processRecipient(notice: NoticeDoc, uid: string): Promise<Recipie
             title: currentNotice.title,
             body: currentNotice.body,
             pinned: currentNotice.pinned,
+            audienceType: currentNotice.audienceType,
+            audienceTowerIds: currentNotice.audienceTowerIds,
+            audienceUnitIds: currentNotice.audienceUnitIds,
             updatedAt: now,
           });
           return { created: 0, updated: 1 };
@@ -117,6 +120,9 @@ async function processRecipient(notice: NoticeDoc, uid: string): Promise<Recipie
           deliveredAt: now,
           updatedAt: now,
           readAt: null,
+          audienceType: currentNotice.audienceType,
+          audienceTowerIds: currentNotice.audienceTowerIds,
+          audienceUnitIds: currentNotice.audienceUnitIds,
         });
         transaction.update(noticeRef, {
           audienceCount: incrementBy(1),

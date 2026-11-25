@@ -8,7 +8,7 @@ import { getFirebaseServices } from '@/lib/firebase';
 import { subscribeToAuthState } from '@/lib/auth/subscription';
 import type { MembershipState } from '@/lib/membership/state';
 import { loadMembership } from '@/lib/membership/repository';
-import type { AccessDecision } from '@/navigation/access';
+import type { AccessDecision, AppRoute } from '@/navigation/access';
 import { AuthProvider, useAuth } from '@/providers/auth-provider';
 import { MembershipProvider, useMembership } from '@/providers/membership-provider';
 
@@ -48,6 +48,7 @@ type Observation = {
   uid: string | null;
   membershipStatus: MembershipState['status'];
   decision: AccessDecision['kind'];
+  decisionTo: AppRoute | null;
   retry: () => void;
 };
 
@@ -73,6 +74,7 @@ let observed: Observation = {
   uid: null,
   membershipStatus: 'anonymous',
   decision: 'loading',
+  decisionTo: null,
   retry: () => {},
 };
 
@@ -117,6 +119,7 @@ function Probe() {
     uid: authValue.user?.uid ?? null,
     membershipStatus: membership.state.status,
     decision: decision.kind,
+    decisionTo: decision.kind === 'redirect' ? decision.to : null,
     retry: membership.retry,
   };
   return null;
@@ -315,4 +318,26 @@ test('retryable membership errors remain distinct and retry the current session'
 
   expect(mockLoadMembership).toHaveBeenCalledTimes(2);
   expect(observed.membershipStatus).toBe('ready');
+});
+
+test('membership refresh after invite redemption moves a pending buyer into the buyer route', async () => {
+  mockUsePathname.mockReturnValue('/pending-membership');
+  mockLoadMembership
+    .mockResolvedValueOnce({ status: 'missing' })
+    .mockResolvedValueOnce(readyMembership('uid-1', 'buyer'));
+  await mountProviders();
+
+  await emitAuth(user('uid-1'));
+
+  expect(observed.membershipStatus).toBe('missing');
+  expect(observed.decision).toBe('allow');
+
+  await act(async () => {
+    observed.retry();
+  });
+
+  expect(mockLoadMembership).toHaveBeenCalledTimes(2);
+  expect(observed.membershipStatus).toBe('ready');
+  expect(observed.decision).toBe('redirect');
+  expect(observed.decisionTo).toBe('/buyer');
 });

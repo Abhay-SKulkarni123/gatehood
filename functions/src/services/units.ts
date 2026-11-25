@@ -1,3 +1,4 @@
+import { Timestamp } from 'firebase-admin/firestore';
 import type { DocumentSnapshot } from 'firebase-admin/firestore';
 import type {
   BuyerContactDoc,
@@ -6,6 +7,8 @@ import type {
   BuyerImportRow,
   TowerDoc,
   UnitDoc,
+  UpdateUnitInfoData,
+  UpdateUnitInfoResult,
 } from '../domain/types';
 import { FIRESTORE_BATCH_LIMIT, IMPORT_LOOKUP_LIMIT } from '../config';
 import { invalidPayload } from '../errors';
@@ -19,6 +22,7 @@ import {
   parseTower,
   parseUnit,
   toRecord,
+  parseUpdateUnitInfo,
 } from '../validation';
 
 interface CsvRow {
@@ -562,5 +566,77 @@ export async function importBuyers(
     unchanged: rows.filter((row) => row.status === 'unchanged').length,
     failed,
     complete: failed === 0,
+  };
+}
+
+function parseRequiredDocument<T>(
+  snapshot: DocumentSnapshot,
+  parser: (value: unknown) => T,
+  id: string,
+  message: string,
+): T {
+  if (!snapshot.exists) {
+    throw invalidPayload(message);
+  }
+  try {
+    return parser({ ...toRecord(snapshot.data()), id });
+  } catch {
+    throw invalidPayload(message);
+  }
+}
+
+export async function updateUnitInfo(
+  builderUid: string,
+  data: UpdateUnitInfoData,
+): Promise<UpdateUnitInfoResult> {
+  const input = parseUpdateUnitInfo(data);
+  const projectSnapshot = await db.doc(paths.project(input.projectId)).get();
+  const unitSnapshot = await db.doc(paths.unit(input.projectId, input.unitId)).get();
+  parseRequiredDocument(
+    projectSnapshot,
+    parseProject,
+    input.projectId,
+    'Project was not found.',
+  );
+  const unit = parseRequiredDocument(
+    unitSnapshot,
+    parseUnit,
+    input.unitId,
+    'Unit was not found.',
+  );
+  if (unit.projectId !== input.projectId) {
+    throw invalidPayload('Unit was not found.');
+  }
+
+  const towerSnapshot = await db.doc(paths.tower(input.projectId, unit.towerId)).get();
+  const tower = parseRequiredDocument(
+    towerSnapshot,
+    parseTower,
+    unit.towerId,
+    'Unit was not found.',
+  );
+  if (tower.projectId !== input.projectId) {
+    throw invalidPayload('Unit was not found.');
+  }
+
+  const [year, month, day] = input.possessionDate.split('-').map(Number);
+  const possessionDate = Timestamp.fromMillis(Date.UTC(year, month - 1, day));
+  const updatedAt = timestampNow();
+
+  await db.doc(paths.unit(input.projectId, input.unitId)).update({
+    configuration: input.configuration,
+    constructionProgress: input.constructionProgress,
+    possessionDate,
+    updatedAt,
+    updatedByUid: builderUid,
+  });
+
+  return {
+    projectId: input.projectId,
+    unitId: input.unitId,
+    configuration: input.configuration,
+    constructionProgress: input.constructionProgress,
+    possessionDate: input.possessionDate,
+    updatedAt: updatedAt.toDate().toISOString(),
   };
 }

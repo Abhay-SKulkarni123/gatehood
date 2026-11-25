@@ -1,8 +1,8 @@
 # Gatehood
 
-Gatehood is a React Native construction communication app. Phase 1 established the Expo/Firebase foundation with validated environment configuration, App Check wiring, emulator support, and strict TypeScript. Phase 2 added the backend foundation: Firestore schema and rules, strict domain models, callable Cloud Functions for invite redemption, notices, fan-out, pinning, and read tracking, plus emulator and security-rule tests. Phase 3 added Firebase Authentication, session-scoped membership resolution, protected Expo Router navigation, and minimal auth, onboarding, and access-confirmation screens. Phase 4 added trusted buyer CSV import, idempotent invite generation, bounded notice read-status retrieval, and functional builder and buyer workflows.
+Gatehood is a React Native construction communication app. Phase 1 established the Expo/Firebase foundation with validated environment configuration, App Check wiring, emulator support, and strict TypeScript. Phase 2 added the backend foundation: Firestore schema and rules, strict domain models, callable Cloud Functions for invite redemption, notices, fan-out, pinning, and read tracking, plus emulator and security-rule tests. Phase 3 added Firebase Authentication, session-scoped membership resolution, protected Expo Router navigation, and minimal auth, onboarding, and access-confirmation screens. Phase 4 added trusted buyer CSV import, idempotent invite generation, bounded notice read-status retrieval, and functional builder and buyer workflows. Phase 5 completed invite redemption states, builder-maintained unit details, possession-day information, and realtime buyer feed filters.
 
-Feature workflows now cover buyer CSV preview/commit from a device file picker or pasted text, invite generation with active-invite reuse and explicit replacement, buyer joining, builder notice publishing and management, canonical read totals with sampled recipient detail, and buyer notice feeds ordered by pin state then delivery time. Imported name/phone details are stored in builder-only `buyerContacts`; buyer feeds never expose another buyer's contact information. Offline feed support, terminal-failure reconciliation, and deployment configuration remain out of scope. See `docs/PHASE2_ARCHITECTURE.md` for the backend schema, flows, and guarantees.
+Feature workflows now cover buyer CSV preview/commit from a device file picker or pasted text, invite generation with active-invite reuse and explicit replacement, buyer joining with clear error/retry/membership-refresh states, builder-maintained unit configuration/progress/possession date, builder notice publishing and management, canonical read totals with sampled recipient detail, and buyer notice feeds updated in realtime and filtered by All, My Tower, or My Unit while keeping pinned-first/newest ordering. Imported name/phone details are stored in builder-only `buyerContacts`; buyer feeds never expose another buyer's contact information. Offline feed support, terminal-failure reconciliation, and deployment configuration remain out of scope. See `docs/PHASE2_ARCHITECTURE.md` for the backend schema, flows, and guarantees.
 
 ## Tech stack
 
@@ -240,6 +240,10 @@ Implemented:
   - Builder workspace with project stats, buyer import, invite generation/replacement, buyer status, notice composer, pin management, and read-status views
   - Buyer invite redemption screen and buyer notice feed ordered by pin state then delivery time
   - Typed callable wrappers, repositories, and pure client helpers for Phase 4 workflows
+  - Duplicate-submission guarded invite redemption with local code validation, safe callable errors, retryable failures, and membership refresh after success
+  - Builder-maintained unit configuration, construction progress, and possession date through an authorized App Check callable
+  - Buyer unit detail display with explicit unavailable states and calendar-day possession information
+  - Realtime buyer feed subscription with All, My Tower, and My Unit filters over delivered notices only
 
 Not implemented:
 

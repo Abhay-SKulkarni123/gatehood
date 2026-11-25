@@ -34,5 +34,7 @@ export type {
   SetNoticePinnedResult,
   TowerDoc,
   UnitDoc,
+  UpdateUnitInfoData,
+  UpdateUnitInfoResult,
   UserDoc,
 } from '../../functions/src/domain/types';
