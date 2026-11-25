@@ -19,9 +19,26 @@ export type ReadReplayCaller = (data: MarkNoticeReadData) => Promise<MarkNoticeR
 const STORAGE_PREFIX = 'gatehood:offline-reads:v1:';
 const DEFAULT_REPLAY_BATCH_SIZE = 5;
 const replaying = new Set<string>();
+const mutationChains = new Map<string, Promise<void>>();
 
 function storageKey(uid: string): string {
   return `${STORAGE_PREFIX}${uid}`;
+}
+
+function withMutationLock<T>(uid: string, operation: () => Promise<T>): Promise<T> {
+  const previous = mutationChains.get(uid) ?? Promise.resolve();
+  const result = previous.then(operation);
+  const released: Promise<void> = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  mutationChains.set(uid, released);
+  void released.then(() => {
+    if (mutationChains.get(uid) === released) {
+      mutationChains.delete(uid);
+    }
+  });
+  return result;
 }
 
 function isQueuedRead(value: unknown): value is QueuedRead {
@@ -74,12 +91,14 @@ export async function loadReadQueue(uid: string, projectId?: string): Promise<Qu
 }
 
 export async function enqueueRead(uid: string, projectId: string, noticeId: string): Promise<void> {
-  const queue = await loadReadQueue(uid);
-  const item: QueuedRead = { projectId, noticeId };
-  if (queue.some((queued) => itemKey(queued) === itemKey(item))) {
-    return;
-  }
-  await AsyncStorage.setItem(storageKey(uid), JSON.stringify([...queue, item]));
+  await withMutationLock(uid, async () => {
+    const queue = await loadReadQueue(uid);
+    const item: QueuedRead = { projectId, noticeId };
+    if (queue.some((queued) => itemKey(queued) === itemKey(item))) {
+      return;
+    }
+    await AsyncStorage.setItem(storageKey(uid), JSON.stringify([...queue, item]));
+  });
 }
 
 export async function removeQueuedRead(
@@ -87,18 +106,20 @@ export async function removeQueuedRead(
   projectId: string,
   noticeId: string,
 ): Promise<void> {
-  const queue = await loadReadQueue(uid);
-  const remaining = queue.filter(
-    (item) => item.projectId !== projectId || item.noticeId !== noticeId,
-  );
-  if (remaining.length === queue.length) {
-    return;
-  }
-  if (remaining.length === 0) {
-    await AsyncStorage.removeItem(storageKey(uid));
-    return;
-  }
-  await AsyncStorage.setItem(storageKey(uid), JSON.stringify(remaining));
+  await withMutationLock(uid, async () => {
+    const queue = await loadReadQueue(uid);
+    const remaining = queue.filter(
+      (item) => item.projectId !== projectId || item.noticeId !== noticeId,
+    );
+    if (remaining.length === queue.length) {
+      return;
+    }
+    if (remaining.length === 0) {
+      await AsyncStorage.removeItem(storageKey(uid));
+      return;
+    }
+    await AsyncStorage.setItem(storageKey(uid), JSON.stringify(remaining));
+  });
 }
 
 export async function replayReadQueue(

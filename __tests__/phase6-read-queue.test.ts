@@ -27,7 +27,16 @@ function result(noticeId: string): MarkNoticeReadResult {
 
 let store: Map<string, string>;
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
+  jest.clearAllMocks();
   store = new Map<string, string>();
   mockGetItem.mockImplementation(async (key: string) => store.get(key) ?? null);
   mockSetItem.mockImplementation(async (key: string, value: string) => {
@@ -148,6 +157,86 @@ test('replay treats already-read callable responses as success and skips concurr
   expect(skipped).toMatchObject({ processed: 0, skipped: true });
   expect(completed).toMatchObject({ succeeded: 1, failed: 0, pending: 0 });
   expect(await loadReadQueue('buyer-1', 'project-1')).toEqual([]);
+});
+
+test('concurrent enqueues for different notices preserve both entries', async () => {
+  const entered = deferred();
+  const release = deferred();
+  mockSetItem.mockImplementationOnce(async (key: string, value: string) => {
+    entered.resolve();
+    await release.promise;
+    store.set(key, value);
+  });
+
+  const first = enqueueRead('buyer-1', 'project-1', 'notice-1');
+  await entered.promise;
+  const second = enqueueRead('buyer-1', 'project-1', 'notice-2');
+  release.resolve();
+  await Promise.all([first, second]);
+
+  expect(await loadReadQueue('buyer-1')).toEqual([
+    { projectId: 'project-1', noticeId: 'notice-1' },
+    { projectId: 'project-1', noticeId: 'notice-2' },
+  ]);
+});
+
+test('concurrent enqueues for the same notice still produce one entry', async () => {
+  const entered = deferred();
+  const release = deferred();
+  mockSetItem.mockImplementationOnce(async (key: string, value: string) => {
+    entered.resolve();
+    await release.promise;
+    store.set(key, value);
+  });
+
+  const first = enqueueRead('buyer-1', 'project-1', 'notice-1');
+  await entered.promise;
+  const second = enqueueRead('buyer-1', 'project-1', 'notice-1');
+  release.resolve();
+  await Promise.all([first, second]);
+
+  expect(await loadReadQueue('buyer-1')).toEqual([
+    { projectId: 'project-1', noticeId: 'notice-1' },
+  ]);
+});
+
+test('an enqueue racing a removal preserves unrelated projects and the new notice', async () => {
+  store.set(
+    'gatehood:offline-reads:v1:buyer-1',
+    JSON.stringify([
+      { projectId: 'project-1', noticeId: 'notice-1' },
+      { projectId: 'project-2', noticeId: 'notice-2' },
+    ]),
+  );
+  const entered = deferred();
+  const release = deferred();
+  mockSetItem.mockImplementationOnce(async (key: string, value: string) => {
+    entered.resolve();
+    await release.promise;
+    store.set(key, value);
+  });
+
+  const enqueue = enqueueRead('buyer-1', 'project-1', 'notice-3');
+  await entered.promise;
+  const removal = removeQueuedRead('buyer-1', 'project-1', 'notice-1');
+  release.resolve();
+  await Promise.all([enqueue, removal]);
+
+  expect(await loadReadQueue('buyer-1')).toEqual([
+    { projectId: 'project-2', noticeId: 'notice-2' },
+    { projectId: 'project-1', noticeId: 'notice-3' },
+  ]);
+});
+
+test('a failed mutation does not permanently lock later mutations', async () => {
+  mockSetItem.mockRejectedValueOnce(new Error('UNAVAILABLE'));
+
+  await expect(enqueueRead('buyer-1', 'project-1', 'notice-1')).rejects.toThrow('UNAVAILABLE');
+  await expect(enqueueRead('buyer-1', 'project-1', 'notice-2')).resolves.toBeUndefined();
+
+  expect(await loadReadQueue('buyer-1')).toEqual([
+    { projectId: 'project-1', noticeId: 'notice-2' },
+  ]);
 });
 
 test('storage read failures propagate so the provider can report pending sync', async () => {

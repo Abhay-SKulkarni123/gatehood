@@ -19,7 +19,11 @@ import {
   loadBuyerUnit,
 } from '@/lib/data/units';
 import { filterBuyerFeed, type BuyerFeedFilter } from '@/lib/data/sort';
-import { callMarkNoticeRead, describeCallableError } from '@/lib/functions';
+import {
+  callMarkNoticeRead,
+  describeCallableError,
+  isTransientCallableError,
+} from '@/lib/functions';
 import { getFirebaseServices } from '@/lib/firebase';
 import { useAuth } from '@/providers/auth-provider';
 import { useMembership } from '@/providers/membership-provider';
@@ -173,7 +177,15 @@ export default function BuyerHomeScreen() {
       });
       await removePendingRead(noticeId);
     } catch (readError) {
-      setError(describeCallableError(readError));
+      if (!isTransientCallableError(readError)) {
+        setError(describeCallableError(readError));
+        return;
+      }
+      try {
+        await queueRead(noticeId);
+      } catch (queueError) {
+        setError(describeCallableError(queueError));
+      }
     } finally {
       setBusyNoticeId(null);
     }

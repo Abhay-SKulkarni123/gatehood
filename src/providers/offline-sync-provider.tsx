@@ -13,6 +13,7 @@ import NetInfo, { useNetInfo } from '@react-native-community/netinfo';
 import { getClientConfig } from '@/config/env';
 import { getFirebaseServices } from '@/lib/firebase';
 import { callMarkNoticeRead, describeCallableError } from '@/lib/functions';
+import { connectionIsUsable } from '@/lib/offline/connectivity';
 import {
   enqueueRead,
   loadReadQueue,
@@ -32,13 +33,6 @@ type OfflineSyncContextValue = {
 };
 
 const OfflineSyncContext = createContext<OfflineSyncContextValue | null>(null);
-
-function connectionIsUsable(state: {
-  isConnected: boolean | null;
-  isInternetReachable: boolean | null;
-}): boolean {
-  return state.isConnected !== false && state.isInternetReachable !== false;
-}
 
 export function OfflineSyncProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();

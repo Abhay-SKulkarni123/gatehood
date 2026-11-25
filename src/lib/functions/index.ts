@@ -29,7 +29,7 @@ async function invoke<Request, Response>(
   return result.data;
 }
 
-export { describeCallableError } from './errors';
+export { describeCallableError, isTransientCallableError } from './errors';
 
 export function callRedeemInvite(
   functions: Functions,
