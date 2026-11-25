@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
+import type { TextInputInstance } from 'react-native';
 import { ErrorState } from '@/components/error-state';
 import { FormField } from '@/components/form-field';
 import { PrimaryButton } from '@/components/primary-button';
@@ -13,19 +14,24 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const emailRef = useRef<TextInputInstance>(null);
+  const passwordRef = useRef<TextInputInstance>(null);
+  const confirmPasswordRef = useRef<TextInputInstance>(null);
 
   const handleSubmit = () => {
-    if (actionPending) {
+    if (actionPending || !email.trim() || !password || !confirmPassword) {
       return;
     }
     void registerBuyer({ email, password, confirmPassword });
   };
 
   return (
-    <Screen>
+    <Screen keyboardAvoiding>
       <View style={styles.header}>
         <Text style={styles.eyebrow}>BUYER ACCESS</Text>
-        <Text style={styles.title}>Create account</Text>
+        <Text accessibilityRole="header" style={styles.title}>
+          Create account
+        </Text>
         <Text style={styles.subtitle}>
           Register with your email. Project membership is granted separately and determines access.
         </Text>
@@ -35,28 +41,36 @@ export default function RegisterScreen() {
         <FormField
           autoCapitalize="none"
           autoComplete="email"
+          inputRef={emailRef}
           keyboardType="email-address"
           label="Email"
           onChangeText={setEmail}
+          onSubmitEditing={() => passwordRef.current?.focus()}
           placeholder="you@example.com"
+          returnKeyType="next"
           value={email}
         />
         <FormField
           autoCapitalize="none"
           autoComplete="password"
+          inputRef={passwordRef}
           label="Password"
           onChangeText={setPassword}
+          onSubmitEditing={() => confirmPasswordRef.current?.focus()}
           placeholder="At least 8 characters with a letter and number"
+          returnKeyType="next"
           secureTextEntry
           value={password}
         />
         <FormField
           autoCapitalize="none"
           autoComplete="password"
+          inputRef={confirmPasswordRef}
           label="Confirm password"
           onChangeText={setConfirmPassword}
           onSubmitEditing={handleSubmit}
           placeholder="Repeat your password"
+          returnKeyType="go"
           secureTextEntry
           value={confirmPassword}
         />
@@ -65,6 +79,7 @@ export default function RegisterScreen() {
             message={actionError}
             onRetry={handleSubmit}
             retryLabel="Try again"
+            retryPending={actionPending}
             title="Registration failed"
           />
         ) : null}
@@ -111,6 +126,7 @@ const styles = StyleSheet.create({
   footer: {
     alignItems: 'center',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
     justifyContent: 'center',
     marginTop: spacing.xl,

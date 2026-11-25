@@ -5,19 +5,15 @@ import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { LoadingIndicator } from '@/components/loading-indicator';
 import { PrimaryButton } from '@/components/primary-button';
+import { ProgressTrack } from '@/components/progress-track';
 import { Screen } from '@/components/screen';
+import { SectionCard } from '@/components/section-card';
+import { StatusBadge } from '@/components/status-badge';
+import { WorkspaceHeader } from '@/components/workspace-header';
 import { getClientConfig } from '@/config/env';
 import { createFeedListenerController, loadBuyerProject } from '@/lib/data/buyer';
-import {
-  createFeedState,
-  feedReducer,
-  feedScopeKey,
-} from '@/lib/data/feed-state';
-import {
-  describeConstructionProgress,
-  describePossessionDate,
-  loadBuyerUnit,
-} from '@/lib/data/units';
+import { createFeedState, feedReducer, feedScopeKey } from '@/lib/data/feed-state';
+import { describeConstructionProgress, describePossessionDate, loadBuyerUnit } from '@/lib/data/units';
 import { filterBuyerFeed, type BuyerFeedFilter } from '@/lib/data/sort';
 import {
   callMarkNoticeRead,
@@ -25,6 +21,7 @@ import {
   isTransientCallableError,
 } from '@/lib/functions';
 import { getFirebaseServices } from '@/lib/firebase';
+import { describeNoticeAudienceSummary } from '@/lib/ui/notices';
 import { useAuth } from '@/providers/auth-provider';
 import { useMembership } from '@/providers/membership-provider';
 import { useOfflineSync } from '@/providers/offline-sync-provider';
@@ -36,15 +33,9 @@ function formatTimestamp(value: FirestoreTimestamp): string {
 }
 
 export default function BuyerHomeScreen() {
-  const { user, logout, actionPending } = useAuth();
+  const { user, logout, actionPending, actionError } = useAuth();
   const { state: membership } = useMembership();
-  const {
-    isOnline,
-    pendingNoticeIds,
-    syncError,
-    queueRead,
-    removePendingRead,
-  } = useOfflineSync();
+  const { isOnline, pendingNoticeIds, syncError, queueRead, removePendingRead } = useOfflineSync();
   const { constructionProjectId } = getClientConfig();
   const uid = user?.uid ?? null;
   const scopeKey = feedScopeKey(uid ?? '', constructionProjectId);
@@ -62,6 +53,7 @@ export default function BuyerHomeScreen() {
   const [unit, setUnit] = useState<UnitDoc | null>(null);
   const [unitLoading, setUnitLoading] = useState(true);
   const [unitError, setUnitError] = useState<string | null>(null);
+  const [unitRetryKey, setUnitRetryKey] = useState(0);
   const [busyNoticeId, setBusyNoticeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -156,7 +148,7 @@ export default function BuyerHomeScreen() {
     return () => {
       active = false;
     };
-  }, [membershipRecord]);
+  }, [membershipRecord, unitRetryKey]);
 
   const filteredEntries = useMemo(
     () => filterBuyerFeed(feed.entries, membershipRecord, feedFilter),
@@ -193,36 +185,37 @@ export default function BuyerHomeScreen() {
 
   return (
     <Screen>
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>BUYER WORKSPACE</Text>
-        <Text style={styles.title}>Project updates</Text>
-        <Text style={styles.subtitle}>
-          Signed in as {user?.email ?? user?.uid ?? 'a buyer'}. Notices arrive here for your unit.
-        </Text>
-        <PrimaryButton label="Sign out" loading={actionPending} onPress={() => void logout()} />
-      </View>
+      <WorkspaceHeader
+        accountLabel={`Signed in as ${user?.email ?? user?.uid ?? 'a buyer'}`}
+        eyebrow="BUYER WORKSPACE"
+        onSignOut={() => void logout()}
+        signOutError={actionError}
+        signOutPending={actionPending}
+        subtitle="Follow construction progress and builder notices for your home through possession."
+        title="Project updates"
+      />
 
       {displayedError ? (
-        <ErrorState
-          message={displayedError}
-          title={error ? 'Action failed' : 'Read sync pending'}
-        />
+        <ErrorState message={displayedError} title={error ? 'Action failed' : 'Read sync pending'} />
       ) : null}
 
       {membershipRecord ? (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>My unit</Text>
+        <SectionCard
+          helper="Your builder publishes these details for your assigned unit."
+          title="My unit"
+        >
           {projectLoading ? (
             <LoadingIndicator label="Loading project details…" />
           ) : projectError ? (
             <ErrorState
               message={projectError}
               onRetry={() => {
-                setProjectLoading(true);
                 setProjectError(null);
+                setProjectLoading(true);
                 setProjectRetryKey((value) => value + 1);
               }}
               retryLabel="Retry project details"
+              retryPending={projectLoading}
               title="Project details unavailable"
             />
           ) : (
@@ -233,7 +226,17 @@ export default function BuyerHomeScreen() {
           {unitLoading ? (
             <LoadingIndicator label="Loading unit details…" />
           ) : unitError ? (
-            <ErrorState message={unitError} title="Unit details unavailable" />
+            <ErrorState
+              message={unitError}
+              onRetry={() => {
+                setUnitError(null);
+                setUnitLoading(true);
+                setUnitRetryKey((value) => value + 1);
+              }}
+              retryLabel="Retry unit details"
+              retryPending={unitLoading}
+              title="Unit details unavailable"
+            />
           ) : (
             <>
               <Text style={styles.detail}>
@@ -243,22 +246,7 @@ export default function BuyerHomeScreen() {
                 Construction: {describeConstructionProgress(unit?.constructionProgress)}
               </Text>
               {typeof unit?.constructionProgress === 'number' ? (
-                <View
-                  accessible
-                  accessibilityLabel="Construction progress"
-                  accessibilityRole="progressbar"
-                  accessibilityValue={{
-                    max: 100,
-                    min: 0,
-                    now: unit.constructionProgress,
-                    text: `${unit.constructionProgress}% complete`,
-                  }}
-                  style={styles.progressTrack}
-                >
-                  <View
-                    style={[styles.progressFill, { width: `${unit.constructionProgress}%` }]}
-                  />
-                </View>
+                <ProgressTrack value={unit.constructionProgress} />
               ) : null}
               <Text style={styles.detail}>{describePossessionDate(unit?.possessionDate)}</Text>
               {unit === null ? (
@@ -266,11 +254,13 @@ export default function BuyerHomeScreen() {
               ) : null}
             </>
           )}
-        </View>
+        </SectionCard>
       ) : null}
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Notices</Text>
+      <SectionCard
+        helper="Pinned notices appear first, followed by the newest updates."
+        title="Notices"
+      >
         <View style={styles.chipRow}>
           <ChoiceChip
             label="All"
@@ -289,11 +279,14 @@ export default function BuyerHomeScreen() {
           />
         </View>
         {feed.fromCache || !isOnline ? (
-          <Text accessibilityRole="status" style={styles.status}>
-            {feed.fromCache
-              ? 'Showing cached notices. Live updates will resume when available.'
-              : 'Offline. Read actions will sync when the connection returns.'}
-          </Text>
+          <View style={styles.statusRow}>
+            <StatusBadge label={feed.fromCache ? 'Cached' : 'Offline'} tone="muted" />
+            <Text accessibilityRole="status" style={styles.status}>
+              {feed.fromCache
+                ? 'Showing cached notices. Live updates will resume when available.'
+                : 'Read actions will sync when the connection returns.'}
+            </Text>
+          </View>
         ) : null}
         {feed.loading && feed.entries.length === 0 ? (
           <LoadingIndicator label="Loading notices…" />
@@ -306,6 +299,7 @@ export default function BuyerHomeScreen() {
             message={feed.error}
             onRetry={() => dispatchFeed({ type: 'retry' })}
             retryLabel="Reload notices"
+            retryPending={feed.loading}
             title="Notices unavailable"
           />
         ) : null}
@@ -325,23 +319,30 @@ export default function BuyerHomeScreen() {
           <View key={entry.noticeId} style={styles.notice}>
             <View style={styles.noticeHeader}>
               <Text style={styles.noticeTitle}>{entry.title}</Text>
-              {entry.pinned ? <Text style={styles.pinned}>Pinned</Text> : null}
+              {entry.pinned ? <StatusBadge label="Pinned" tone="accent" /> : null}
             </View>
             <Text style={styles.body}>{entry.body}</Text>
+            <Text style={styles.detail}>Audience: {describeNoticeAudienceSummary(entry)}</Text>
             <Text style={styles.detail}>Delivered {formatTimestamp(entry.deliveredAt)}</Text>
-            {entry.readAt !== null ? (
-              <Text style={styles.read}>Read {formatTimestamp(entry.readAt)}</Text>
-            ) : pendingSet.has(entry.noticeId) ? (
-              <Text accessibilityRole="status" style={styles.pending}>
-                Pending sync
-              </Text>
-            ) : (
+            <View style={styles.statusRow}>
+              {entry.readAt !== null ? (
+                <StatusBadge label="Read" tone="accent" />
+              ) : pendingSet.has(entry.noticeId) ? (
+                <StatusBadge label="Pending sync" tone="muted" />
+              ) : (
+                <StatusBadge label="Unread" tone="muted" />
+              )}
+              {entry.readAt !== null ? (
+                <Text style={styles.detail}>Read {formatTimestamp(entry.readAt)}</Text>
+              ) : null}
+            </View>
+            {entry.readAt === null && !pendingSet.has(entry.noticeId) ? (
               <PrimaryButton
                 label="Mark as read"
                 loading={busyNoticeId === entry.noticeId}
                 onPress={() => void handleMarkRead(entry.noticeId)}
               />
-            )}
+            ) : null}
           </View>
         ))}
         {feed.loadingMore ? <LoadingIndicator label="Loading more notices…" /> : null}
@@ -351,58 +352,16 @@ export default function BuyerHomeScreen() {
             onPress={() => dispatchFeed({ type: 'loadMore' })}
           />
         ) : null}
-      </View>
+      </SectionCard>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    gap: spacing.md,
-    marginTop: spacing.xl,
-  },
-  eyebrow: {
-    ...typography.eyebrow,
-    color: colors.accent,
-  },
-  title: {
-    ...typography.heading,
-    color: colors.text,
-    fontSize: 28,
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textMuted,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    gap: spacing.md,
-    marginTop: spacing.lg,
-    padding: spacing.lg,
-  },
-  sectionTitle: {
-    ...typography.heading,
-    color: colors.text,
-  },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
-  },
-  progressTrack: {
-    backgroundColor: colors.border,
-    borderRadius: radius.sm,
-    height: 8,
-    overflow: 'hidden',
-    width: '100%',
-  },
-  progressFill: {
-    backgroundColor: colors.accent,
-    borderRadius: radius.sm,
-    height: '100%',
   },
   detail: {
     ...typography.caption,
@@ -417,6 +376,7 @@ const styles = StyleSheet.create({
   noticeHeader: {
     alignItems: 'center',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
   },
   noticeTitle: {
@@ -424,26 +384,19 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontWeight: '700',
   },
-  pinned: {
-    ...typography.caption,
-    color: colors.accent,
-    fontWeight: '700',
-  },
   body: {
     ...typography.body,
     color: colors.textMuted,
   },
-  read: {
-    ...typography.caption,
-    color: colors.accent,
-  },
-  pending: {
-    ...typography.caption,
-    color: colors.textMuted,
-    fontWeight: '700',
+  statusRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
   status: {
     ...typography.caption,
     color: colors.textMuted,
+    flexShrink: 1,
   },
 });

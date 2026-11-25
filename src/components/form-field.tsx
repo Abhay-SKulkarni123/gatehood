@@ -1,4 +1,5 @@
-import type { KeyboardTypeOptions } from 'react-native';
+import type { RefObject } from 'react';
+import type { KeyboardTypeOptions, ReturnKeyTypeOptions, TextInputInstance } from 'react-native';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 
@@ -14,7 +15,9 @@ type FormFieldProps = {
   multiline?: boolean;
   numberOfLines?: number;
   error?: string | null;
+  inputRef?: RefObject<TextInputInstance | null>;
   onSubmitEditing?: () => void;
+  returnKeyType?: ReturnKeyTypeOptions;
 };
 
 export function FormField({
@@ -29,14 +32,16 @@ export function FormField({
   multiline = false,
   numberOfLines,
   error,
+  inputRef,
   onSubmitEditing,
+  returnKeyType = 'done',
 }: FormFieldProps) {
   return (
     <View style={styles.container}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
+        accessibilityHint={error ?? undefined}
         accessibilityLabel={label}
-        accessibilityRole="none"
         autoCapitalize={autoCapitalize}
         autoComplete={autoComplete}
         autoCorrect={false}
@@ -47,6 +52,8 @@ export function FormField({
         onSubmitEditing={onSubmitEditing}
         placeholder={placeholder}
         placeholderTextColor={colors.textMuted}
+        ref={inputRef}
+        returnKeyType={returnKeyType}
         secureTextEntry={secureTextEntry}
         style={[styles.input, multiline ? styles.multilineInput : null, error ? styles.inputError : null]}
         value={value}

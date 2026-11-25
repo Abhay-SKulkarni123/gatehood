@@ -8,6 +8,9 @@ import { FormField } from '@/components/form-field';
 import { LoadingIndicator } from '@/components/loading-indicator';
 import { PrimaryButton } from '@/components/primary-button';
 import { Screen } from '@/components/screen';
+import { SectionCard } from '@/components/section-card';
+import { StatusBadge } from '@/components/status-badge';
+import { WorkspaceHeader } from '@/components/workspace-header';
 import { getClientConfig } from '@/config/env';
 import {
   canCommitBuyerImport,
@@ -27,6 +30,7 @@ import {
   callUpdateUnitInfo,
 } from '@/lib/functions';
 import { getFirebaseServices } from '@/lib/firebase';
+import { parseConstructionProgressInput } from '@/lib/ui/unit-info';
 import { useAuth } from '@/providers/auth-provider';
 import type {
   BuyerContactDoc,
@@ -65,18 +69,24 @@ function formatTimestamp(value: FirestoreTimestamp | string): string {
   return value.toDate().toLocaleString();
 }
 
-function audienceLabel(notice: NoticeDoc): string {
+function audienceLabel(
+  notice: NoticeDoc,
+  towerNames: Map<string, string>,
+  unitLabels: Map<string, string>,
+): string {
   if (notice.audienceType === 'project') {
     return 'All buyers';
   }
   if (notice.audienceType === 'tower') {
-    return `Towers: ${notice.audienceTowerIds.join(', ')}`;
+    const names = notice.audienceTowerIds.map((id) => towerNames.get(id) ?? id);
+    return names.length === 1 ? `Tower: ${names[0]}` : `Towers: ${names.join(', ')}`;
   }
-  return `Units: ${notice.audienceUnitIds.join(', ')}`;
+  const labels = notice.audienceUnitIds.map((id) => unitLabels.get(id) ?? id);
+  return labels.length === 1 ? `Unit: ${labels[0]}` : `Units: ${labels.join(', ')}`;
 }
 
 export default function BuilderHomeScreen() {
-  const { user, logout, actionPending } = useAuth();
+  const { user, logout, actionPending, actionError } = useAuth();
   const { constructionProjectId } = getClientConfig();
 
   const [snapshot, setSnapshot] = useState<BuilderSnapshot | null>(null);
@@ -201,14 +211,12 @@ export default function BuilderHomeScreen() {
 
   const handleUpdateUnitInfo = async (unit: UnitDoc) => {
     const draft = currentDraftForUnit(unit);
-    const constructionProgress = Number(draft.constructionProgress.trim());
+    const constructionProgress = parseConstructionProgressInput(draft.constructionProgress);
     const configuration = draft.configuration.trim();
     const possessionDate = draft.possessionDate.trim();
     if (
       !configuration ||
-      !Number.isInteger(constructionProgress) ||
-      constructionProgress < 0 ||
-      constructionProgress > 100 ||
+      constructionProgress === null ||
       !isValidPossessionDateInput(possessionDate)
     ) {
       setError(
@@ -284,7 +292,10 @@ export default function BuilderHomeScreen() {
         setImportPreview({ csv, result });
         setMessage('Preview ready. Review each row before importing.');
       } else {
-        applyCsv('');
+        setCsv('');
+        setCsvFileName(null);
+        setClientCsvErrors([]);
+        setImportPreview(null);
         setMessage(
           `${result.created} buyer contact${result.created === 1 ? '' : 's'} imported; ` +
             `${result.unchanged} unchanged.`,
@@ -371,6 +382,7 @@ export default function BuilderHomeScreen() {
   const handleReadStatus = async (noticeId: string) => {
     setBusy(`status:${noticeId}`);
     setError(null);
+    setReadStatus(null);
     try {
       setReadStatus(
         await callGetNoticeReadStatus(getFirebaseServices().functions, {
@@ -420,22 +432,26 @@ export default function BuilderHomeScreen() {
     importPending: busy === 'import',
   });
   const visibleImportPreview = importPreview?.csv === csv ? importPreview.result : null;
+  const selectedAudienceIds = useMemo(() => new Set(parseIdList(audienceIds)), [audienceIds]);
+
+  const toggleAudienceId = (id: string) => {
+    const next = selectedAudienceIds.has(id)
+      ? Array.from(selectedAudienceIds).filter((value) => value !== id)
+      : [...selectedAudienceIds, id];
+    setAudienceIds(next.join(', '));
+  };
 
   return (
     <Screen>
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>BUILDER WORKSPACE</Text>
-        <Text style={styles.title}>{snapshot?.project?.name ?? 'Project workspace'}</Text>
-        <Text style={styles.subtitle}>
-          Signed in as {user?.email ?? user?.uid ?? 'a builder'}. Manage units, invites, and notices
-          for this project.
-        </Text>
-        <PrimaryButton
-          label="Sign out"
-          loading={actionPending}
-          onPress={() => void logout()}
-        />
-      </View>
+      <WorkspaceHeader
+        accountLabel={`Signed in as ${user?.email ?? user?.uid ?? 'a builder'}`}
+        eyebrow="BUILDER WORKSPACE"
+        onSignOut={() => void logout()}
+        signOutError={actionError}
+        signOutPending={actionPending}
+        subtitle="Manage units, invites, and notices for this project."
+        title={snapshot?.project?.name ?? 'Project workspace'}
+      />
 
       {message ? <Text accessibilityRole="status" style={styles.message}>{message}</Text> : null}
       {error ? <ErrorState message={error} title="Action failed" /> : null}
@@ -452,31 +468,28 @@ export default function BuilderHomeScreen() {
       ) : (
         <View style={styles.sections}>
           <View style={styles.statsRow}>
-            <View style={styles.statCard}>
+            <View accessibilityLabel={`${snapshot.towers.length} towers`} style={styles.statCard}>
               <Text style={styles.statValue}>{snapshot.towers.length}</Text>
               <Text style={styles.statLabel}>Towers</Text>
             </View>
-            <View style={styles.statCard}>
+            <View accessibilityLabel={`${snapshot.units.length} units`} style={styles.statCard}>
               <Text style={styles.statValue}>{snapshot.units.length}</Text>
               <Text style={styles.statLabel}>Units</Text>
             </View>
-            <View style={styles.statCard}>
+            <View accessibilityLabel={`${snapshot.buyers.length} buyers`} style={styles.statCard}>
               <Text style={styles.statValue}>{snapshot.buyers.length}</Text>
               <Text style={styles.statLabel}>Buyers</Text>
             </View>
-            <View style={styles.statCard}>
+            <View accessibilityLabel={`${snapshot.notices.length} notices`} style={styles.statCard}>
               <Text style={styles.statValue}>{snapshot.notices.length}</Text>
               <Text style={styles.statLabel}>Notices</Text>
             </View>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Import buyers</Text>
-            <Text style={styles.helper}>
-              Choose a CSV with Tower, Unit, Name, and Phone columns, or paste one below. Existing
-              tower and unit names are reused; contact details are stored separately from buyer
-              feeds.
-            </Text>
+          <SectionCard
+            helper="Choose a CSV with Tower, Unit, Name, and Phone columns, or paste one below. Existing tower and unit names are reused."
+            title="Import buyers"
+          >
             <Text style={styles.previewSummary}>
               Preview the CSV before importing. Import unlocks only after a successful server-side
               preview; editing the CSV requires a new preview.
@@ -536,15 +549,12 @@ export default function BuilderHomeScreen() {
                 ))}
               </View>
             ) : null}
-          </View>
+          </SectionCard>
 
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Invites and buyer status</Text>
-            <Text style={styles.helper}>
-              Generate a single-use code for a unit. Repeated calls reuse the active invite; its
-              code cannot be recovered after a lost response. Replacing an invite revokes the
-              previous code immediately. Saved unit details are shown to the assigned buyer.
-            </Text>
+          <SectionCard
+            helper="Generate a single-use code for a unit. Replacing an invite revokes the previous code immediately. Saved unit details appear in the buyer's workspace."
+            title="Invites and buyer status"
+          >
             {snapshot.units.length === 0 ? (
               <EmptyState message="Import buyers to create units before generating invites." title="No units yet" />
             ) : (
@@ -563,9 +573,10 @@ export default function BuilderHomeScreen() {
                         <Text style={styles.rowDetail}>
                           {towerNames.get(unit.towerId) ?? unit.towerId} · {unit.id}
                         </Text>
-                        <Text style={buyer ? styles.joined : styles.awaiting}>
-                          {buyer ? `Joined as ${buyer.uid}` : 'Not joined'}
-                        </Text>
+                        <StatusBadge
+                          label={buyer ? `Joined as ${buyer.uid}` : 'Not joined'}
+                          tone={buyer ? 'accent' : 'danger'}
+                        />
                         {contactLabel ? (
                           <Text style={styles.rowDetail}>Imported: {contactLabel}</Text>
                         ) : null}
@@ -574,6 +585,10 @@ export default function BuilderHomeScreen() {
                         <Pressable
                           accessibilityLabel={`Generate invite for ${unit.label}`}
                           accessibilityRole="button"
+                          accessibilityState={{
+                            busy: busy === `invite:${unit.id}`,
+                            disabled: busy !== null,
+                          }}
                           disabled={busy !== null}
                           onPress={() => void handleGenerateInvite(unit.towerId, unit.id)}
                           style={({ pressed }) => [
@@ -589,6 +604,10 @@ export default function BuilderHomeScreen() {
                         <Pressable
                           accessibilityLabel={`Replace invite for ${unit.label}`}
                           accessibilityRole="button"
+                          accessibilityState={{
+                            busy: busy === `replace-invite:${unit.id}`,
+                            disabled: busy !== null,
+                          }}
                           disabled={busy !== null}
                           onPress={() => void handleGenerateInvite(unit.towerId, unit.id, true)}
                           style={({ pressed }) => [
@@ -657,10 +676,12 @@ export default function BuilderHomeScreen() {
                 </Text>
               </View>
             ) : null}
-          </View>
+          </SectionCard>
 
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Publish notice</Text>
+          <SectionCard
+            helper="Choose an audience and publish a construction update. Delivery and read status appear below."
+            title="Publish notice"
+          >
             <FormField label="Title" onChangeText={setTitle} placeholder="Water supply update" value={title} />
             <FormField
               label="Message"
@@ -673,38 +694,72 @@ export default function BuilderHomeScreen() {
             <View style={styles.chipRow}>
               <ChoiceChip
                 label="All buyers"
-                onPress={() => setAudienceType('project')}
+                onPress={() => {
+                  setAudienceIds('');
+                  setAudienceType('project');
+                }}
                 selected={audienceType === 'project'}
               />
               <ChoiceChip
                 label="Towers"
-                onPress={() => setAudienceType('tower')}
+                onPress={() => {
+                  setAudienceIds('');
+                  setAudienceType('tower');
+                }}
                 selected={audienceType === 'tower'}
               />
               <ChoiceChip
                 label="Units"
-                onPress={() => setAudienceType('unit')}
+                onPress={() => {
+                  setAudienceIds('');
+                  setAudienceType('unit');
+                }}
                 selected={audienceType === 'unit'}
               />
             </View>
-            {audienceType === 'project' ? null : (
-              <FormField
-                label={audienceType === 'tower' ? 'Tower IDs' : 'Unit IDs'}
-                onChangeText={setAudienceIds}
-                placeholder="Comma-separated IDs"
-                value={audienceIds}
-              />
-            )}
+            {audienceType === 'tower' ? (
+              snapshot.towers.length === 0 ? (
+                <EmptyState message="Import buyers to create towers before targeting them." title="No towers yet" />
+              ) : (
+                <View style={styles.chipRow}>
+                  {snapshot.towers.map((tower) => (
+                    <ChoiceChip
+                      key={tower.id}
+                      label={tower.name}
+                      onPress={() => toggleAudienceId(tower.id)}
+                      selected={selectedAudienceIds.has(tower.id)}
+                    />
+                  ))}
+                </View>
+              )
+            ) : audienceType === 'unit' ? (
+              snapshot.units.length === 0 ? (
+                <EmptyState message="Import buyers to create units before targeting them." title="No units yet" />
+              ) : (
+                <View style={styles.chipRow}>
+                  {snapshot.units.map((unit) => (
+                    <ChoiceChip
+                      key={unit.id}
+                      label={unit.label}
+                      onPress={() => toggleAudienceId(unit.id)}
+                      selected={selectedAudienceIds.has(unit.id)}
+                    />
+                  ))}
+                </View>
+              )
+            ) : null}
             <PrimaryButton
               disabled={!canPublish}
               label="Publish notice"
               loading={busy === 'create-notice'}
               onPress={() => void handleCreateNotice()}
             />
-          </View>
+          </SectionCard>
 
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Notices</Text>
+          <SectionCard
+            helper="Review delivery, pinning, and read status for each published notice."
+            title="Notices"
+          >
             {snapshot.notices.length === 0 ? (
               <EmptyState message="Published notices will appear here." title="No notices yet" />
             ) : (
@@ -712,10 +767,12 @@ export default function BuilderHomeScreen() {
                 <View key={notice.id} style={styles.notice}>
                   <View style={styles.noticeHeader}>
                     <Text style={styles.rowTitle}>{notice.title}</Text>
-                    {notice.pinned ? <Text style={styles.pinned}>Pinned</Text> : null}
+                    {notice.pinned ? <StatusBadge label="Pinned" tone="accent" /> : null}
                   </View>
                   <Text style={styles.noticeBody}>{notice.body}</Text>
-                  <Text style={styles.rowDetail}>{audienceLabel(notice)}</Text>
+                  <Text style={styles.rowDetail}>
+                    {audienceLabel(notice, towerNames, unitLabels)}
+                  </Text>
                   <Text style={styles.rowDetail}>
                     Audience {notice.audienceCount} · Read {notice.readCount} · Fan-out{' '}
                     {notice.fanoutStatus} ({notice.fanoutFailedCount} failed)
@@ -773,7 +830,7 @@ export default function BuilderHomeScreen() {
                 </View>
               ))
             )}
-          </View>
+          </SectionCard>
         </View>
       )}
     </Screen>

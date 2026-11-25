@@ -1,17 +1,22 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { PrimaryButton } from '@/components/primary-button';
 import { colors, radius, spacing, typography } from '@/theme';
 
 type ErrorStateProps = {
   message: string;
   onRetry?: () => void;
+  retryDisabled?: boolean;
   retryLabel?: string;
+  retryPending?: boolean;
   title?: string;
 };
 
 export function ErrorState({
   message,
   onRetry,
+  retryDisabled = false,
   retryLabel = 'Try again',
+  retryPending = false,
   title = 'Something went wrong',
 }: ErrorStateProps) {
   return (
@@ -19,14 +24,14 @@ export function ErrorState({
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.message}>{message}</Text>
       {onRetry ? (
-        <Pressable
-          accessibilityLabel={retryLabel}
-          accessibilityRole="button"
-          onPress={onRetry}
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-        >
-          <Text style={styles.buttonLabel}>{retryLabel}</Text>
-        </Pressable>
+        <View style={styles.retry}>
+          <PrimaryButton
+            disabled={retryDisabled}
+            label={retryLabel}
+            loading={retryPending}
+            onPress={onRetry}
+          />
+        </View>
       ) : null}
     </View>
   );
@@ -50,21 +55,9 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textMuted,
   },
-  button: {
-    alignItems: 'center',
-    backgroundColor: colors.accent,
-    borderRadius: radius.md,
-    justifyContent: 'center',
+  retry: {
+    alignSelf: 'flex-start',
     marginTop: spacing.sm,
-    minHeight: 48,
-    paddingHorizontal: spacing.lg,
-  },
-  buttonPressed: {
-    opacity: 0.8,
-  },
-  buttonLabel: {
-    ...typography.caption,
-    color: colors.background,
-    fontWeight: '700',
+    minWidth: 160,
   },
 });

@@ -13,7 +13,7 @@ import { useMembership } from '@/providers/membership-provider';
 import { colors, spacing, typography } from '@/theme';
 
 export default function PendingMembershipScreen() {
-  const { user, logout, actionPending } = useAuth();
+  const { user, logout, actionPending, actionError } = useAuth();
   const { retry } = useMembership();
   const { functions } = getFirebaseServices();
   const { constructionProjectId } = getClientConfig();
@@ -62,10 +62,12 @@ export default function PendingMembershipScreen() {
   };
 
   return (
-    <Screen>
+    <Screen keyboardAvoiding>
       <View style={styles.content}>
         <Text style={styles.eyebrow}>ACCESS PENDING</Text>
-        <Text style={styles.title}>Project membership required</Text>
+        <Text accessibilityRole="header" style={styles.title}>
+          Project membership required
+        </Text>
         <Text style={styles.message}>
           Redeem an invite from your builder to join {constructionProjectId}. Membership determines
           access to this project.
@@ -75,7 +77,9 @@ export default function PendingMembershipScreen() {
           error={codeError}
           label="Invite code"
           onChangeText={setCode}
+          onSubmitEditing={() => void handleRedeem()}
           placeholder="Enter the code from your builder"
+          returnKeyType="go"
           value={code}
         />
         {message ? <Text accessibilityRole="status" style={styles.success}>{message}</Text> : null}
@@ -84,11 +88,21 @@ export default function PendingMembershipScreen() {
             message={error}
             onRetry={() => void handleRedeem()}
             retryLabel="Try redeeming again"
+            retryPending={busy}
             title="Invite redemption failed"
           />
         ) : null}
+        {actionError ? (
+          <ErrorState
+            message={actionError}
+            onRetry={() => void logout()}
+            retryLabel="Retry sign-out"
+            retryPending={actionPending}
+            title="Sign-out failed"
+          />
+        ) : null}
         <PrimaryButton
-          disabled={busy}
+          disabled={busy || !code.trim() || Boolean(codeError)}
           label="Redeem invite"
           loading={busy}
           onPress={() => void handleRedeem()}

@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, spacing, typography } from '@/theme';
+import { colors, radius, spacing, typography } from '@/theme';
 
 type EmptyStateProps = {
   message: string;
@@ -8,7 +8,7 @@ type EmptyStateProps = {
 
 export function EmptyState({ message, title }: EmptyStateProps) {
   return (
-    <View style={styles.container}>
+    <View accessibilityRole="status" style={styles.container}>
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.message}>{message}</Text>
     </View>
@@ -19,7 +19,7 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     borderColor: colors.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderStyle: 'dashed',
     borderWidth: 1,
     gap: spacing.sm,

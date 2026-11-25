@@ -1,26 +1,43 @@
 import type { ReactNode } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing } from '@/theme';
 
 type ScreenProps = {
   children: ReactNode;
+  keyboardAvoiding?: boolean;
 };
 
-export function Screen({ children }: ScreenProps) {
+export function Screen({ children, keyboardAvoiding = false }: ScreenProps) {
+  const scrollView = (
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <View style={styles.inner}>{children}</View>
+    </ScrollView>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.inner}>{children}</View>
-      </ScrollView>
+      {keyboardAvoiding ? (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.flex}
+        >
+          {scrollView}
+        </KeyboardAvoidingView>
+      ) : (
+        scrollView
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: {
-    flex: 1,
     backgroundColor: colors.background,
+    flex: 1,
+  },
+  flex: {
+    flex: 1,
   },
   content: {
     flexGrow: 1,

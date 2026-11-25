@@ -7,7 +7,7 @@ import { useMembership } from '@/providers/membership-provider';
 import { spacing } from '@/theme';
 
 export default function MembershipUnavailableScreen() {
-  const { logout, actionPending } = useAuth();
+  const { logout, actionPending, actionError } = useAuth();
   const { state, retry } = useMembership();
   const message =
     state.status === 'error'
@@ -23,6 +23,15 @@ export default function MembershipUnavailableScreen() {
           retryLabel="Retry membership check"
           title="Membership check unavailable"
         />
+        {actionError ? (
+          <ErrorState
+            message={actionError}
+            onRetry={() => void logout()}
+            retryLabel="Retry sign-out"
+            retryPending={actionPending}
+            title="Sign-out failed"
+          />
+        ) : null}
         <PrimaryButton
           label="Sign out"
           loading={actionPending}
