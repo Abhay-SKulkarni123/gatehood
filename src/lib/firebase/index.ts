@@ -5,7 +5,7 @@ import {
 } from '@react-native-firebase/app-check';
 import { connectAuthEmulator, getAuth } from '@react-native-firebase/auth';
 import { connectFirestoreEmulator, getFirestore } from '@react-native-firebase/firestore';
-import { getFunctions } from '@react-native-firebase/functions';
+import { connectFunctionsEmulator, getFunctions } from '@react-native-firebase/functions';
 import { Platform } from 'react-native';
 import type { ClientConfig } from '@/config/env';
 import type { FirebaseServices } from '@/types/firebase';
@@ -14,6 +14,7 @@ let cachedAppCheck: FirebaseServices['appCheck'] | null = null;
 let cachedServices: FirebaseServices | null = null;
 let authEmulatorConnected = false;
 let firestoreEmulatorConnected = false;
+let functionsEmulatorConnected = false;
 
 function emulatorHost(): string {
   return Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
@@ -42,6 +43,13 @@ function getAppCheck(app: FirebaseServices['app']): FirebaseServices['appCheck']
   return cachedAppCheck;
 }
 
+export function getFirebaseServices(): FirebaseServices {
+  if (!cachedServices) {
+    throw new Error('Firebase has not been initialized.');
+  }
+  return cachedServices;
+}
+
 export function initializeFirebase(config: ClientConfig): FirebaseServices {
   if (cachedServices) {
     return cachedServices;
@@ -64,6 +72,11 @@ export function initializeFirebase(config: ClientConfig): FirebaseServices {
     if (!firestoreEmulatorConnected) {
       connectFirestoreEmulator(firestore, host, 8080);
       firestoreEmulatorConnected = true;
+    }
+
+    if (!functionsEmulatorConnected) {
+      connectFunctionsEmulator(functions, host, 5001);
+      functionsEmulatorConnected = true;
     }
   }
 

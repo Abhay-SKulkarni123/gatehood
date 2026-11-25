@@ -1,0 +1,18 @@
+export const paths = {
+  user: (uid: string): string => `users/${uid}`,
+  feed: (uid: string, noticeId: string): string => `users/${uid}/feed/${noticeId}`,
+  project: (projectId: string): string => `projects/${projectId}`,
+  members: (projectId: string): string => `projects/${projectId}/members`,
+  member: (projectId: string, uid: string): string => `projects/${projectId}/members/${uid}`,
+  towers: (projectId: string): string => `projects/${projectId}/towers`,
+  tower: (projectId: string, towerId: string): string => `projects/${projectId}/towers/${towerId}`,
+  units: (projectId: string): string => `projects/${projectId}/units`,
+  unit: (projectId: string, unitId: string): string => `projects/${projectId}/units/${unitId}`,
+  invites: (): string => 'invites',
+  invite: (codeHash: string): string => `invites/${codeHash}`,
+  notices: (projectId: string): string => `projects/${projectId}/notices`,
+  notice: (projectId: string, noticeId: string): string => `projects/${projectId}/notices/${noticeId}`,
+  failures: (projectId: string): string => `projects/${projectId}/fanoutFailures`,
+  failure: (projectId: string, failureId: string): string => `projects/${projectId}/fanoutFailures/${failureId}`,
+  retryLock: (): string => '_system/fanoutRetryLock',
+};

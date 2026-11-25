@@ -9,7 +9,11 @@
     "ios": "expo start --ios",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "build:functions": "npm --prefix functions run build",
+    "typecheck:functions": "npm --prefix functions run typecheck",
+    "test:backend": "npm run build:functions && firebase emulators:exec --project demo-gatehood --only auth,firestore,functions \"npm --prefix functions test\"",
+    "test:rules": "npm run build:functions && firebase emulators:exec --project demo-gatehood --only firestore \"npm --prefix functions test -- --runTestsByPath test/rules.test.ts\""
   },
   "dependencies": {
     "@react-native-firebase/app": "27.1.1",
@@ -40,18 +44,9 @@
     "eslint": "9.39.5",
     "eslint-config-expo": "58.0.4",
     "eslint-import-resolver-typescript": "^4.4.5",
+    "firebase-tools": "15.37.0",
     "jest": "30.5.2",
     "jest-expo": "~58.0.15",
     "typescript": "~6.0.3"
-  },
-  "jest": {
-    "preset": "jest-expo",
-    "moduleNameMapper": {
-      "^@/(.*)$": "<rootDir>/src/$1"
-    },
-    "testMatch": [
-      "**/__tests__/**/*.test.ts",
-      "**/__tests__/**/*.test.tsx"
-    ]
   }
 }

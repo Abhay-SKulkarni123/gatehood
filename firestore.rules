@@ -2,6 +2,68 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberPath(projectId) {
+      return /databases/$(database)/documents/projects/$(projectId)/members/$(request.auth.uid);
+    }
+
+    function isMember(projectId) {
+      return signedIn() && exists(memberPath(projectId));
+    }
+
+    function isRole(projectId, role) {
+      return isMember(projectId) && get(memberPath(projectId)).data.role == role;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid && request.resource.data.uid == uid;
+      allow update, delete: if false;
+
+      match /feed/{noticeId} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow write: if false;
+      }
+    }
+
+    match /projects/{projectId} {
+      allow read: if isMember(projectId);
+      allow write: if false;
+
+      match /members/{memberUid} {
+        allow read: if isMember(projectId) &&
+          (isRole(projectId, 'builder') || request.auth.uid == memberUid);
+        allow write: if false;
+      }
+
+      match /towers/{towerId} {
+        allow read: if isMember(projectId);
+        allow write: if false;
+      }
+
+      match /units/{unitId} {
+        allow read: if isMember(projectId);
+        allow write: if false;
+      }
+
+      match /notices/{noticeId} {
+        allow read: if isMember(projectId);
+        allow write: if false;
+      }
+
+      match /fanoutFailures/{failureId} {
+        allow read: if isMember(projectId);
+        allow write: if false;
+      }
+    }
+
+    match /invites/{codeHash} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

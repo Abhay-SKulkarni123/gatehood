@@ -1,8 +1,8 @@
 # Gatehood
 
-Gatehood is a React Native construction communication app. Phase 1 provides the project foundation only: Expo SDK 58, Expo Router, strict TypeScript, React Native Firebase integration, App Check initialization hooks, Firebase Emulator configuration, and foundational UI components.
+Gatehood is a React Native construction communication app. Phase 2 adds the backend foundation on top of the Phase 1 Expo/Firebase setup: Firestore schema and rules, strict domain models, callable Cloud Functions for invite redemption, notices, fan-out, pinning, and read tracking, plus emulator and security-rule tests.
 
-No business workflows are implemented yet. There are no authentication screens, invites, CSV import, notices, feeds, read tracking, or builder/buyer dashboards.
+No feature screens are implemented yet. There are no authentication screens, invite screens, CSV import UI, notice composer, feeds, or builder/buyer dashboards. See `docs/PHASE2_ARCHITECTURE.md` for the schema, flows, and guarantees.
 
 ## Tech stack
 
@@ -53,11 +53,11 @@ EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true
 
 `EXPO_PUBLIC_FUNCTIONS_REGION` is the Cloud Functions deployment region.
 
-`EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` points Auth and Firestore at local emulators. Android cleartext HTTP is enabled only for local development and EAS `development` builds when this flag is exactly `true`; EAS `preview` and `production` builds remain restricted even if the flag is mistakenly set. App Check has no emulator; the Functions emulator and client wiring are deferred until Functions source exists.
+`EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` points Auth, Firestore, and Functions at local emulators. Android cleartext HTTP is enabled only for local development and EAS `development` builds when this flag is exactly `true`; EAS `preview` and `production` builds remain restricted even if the flag is mistakenly set. App Check has no emulator; callable functions are declared with App Check enforcement for deployed environments.
 
 ### Backend and deployment variables
 
-These are placeholders for later phases and are not consumed by the Phase 1 app:
+These configure backend deployment and tools:
 
 ```text
 FIREBASE_PROJECT_ID=your-firebase-project-id
@@ -96,7 +96,7 @@ A real Firebase project is not connected in this repository. Native builds requi
 
 The Android package is `com.gatehood.app` and the iOS bundle identifier is `com.gatehood.app`. Your Firebase apps must use matching identifiers.
 
-App Check is initialized from `src/lib/firebase/index.ts` through a singleton Firebase module. It is initialized immediately after `getApp()` and before `getAuth()`, `getFirestore()`, or `getFunctions()` are called, and it is cached so repeated calls and retries do not initialize it again. In debug builds, the Android and Apple debug providers are selected. In release builds, Play Integrity and App Attest with DeviceCheck fallback are selected as the intended provider configuration. Production tokens require real Firebase console app registration and App Check provider configuration; no production enforcement is claimed or operational in Phase 1.
+App Check is initialized from `src/lib/firebase/index.ts` through a singleton Firebase module. It is initialized immediately after `getApp()` and before `getAuth()`, `getFirestore()`, or `getFunctions()` are called, and it is cached so repeated calls and retries do not initialize it again. In debug builds, the Android and Apple debug providers are selected. In release builds, Play Integrity and App Attest with DeviceCheck fallback are selected as the intended provider configuration. All callable functions in `functions/src/index.ts` use `enforceAppCheck: true`, so production calls require valid App Check tokens once the Firebase apps are registered.
 
 ## Running locally
 
@@ -135,16 +135,30 @@ Alternatively, use EAS Build to create installable development builds.
 Start Firebase emulators in a separate terminal:
 
 ```bash
-firebase emulators:start
+npx firebase emulators:start
 ```
 
 Emulator ports:
 
 - Auth: `9099`
 - Firestore: `8080`
+- Functions: `5001`
 - Emulator UI: `5000`
 
-Only the Auth and Firestore emulators are configured in `firebase.json`. The client only calls `connectAuthEmulator` and `connectFirestoreEmulator`; there is no Functions emulator running and no `connectFunctionsEmulator` call in Phase 1. Functions emulator configuration and client wiring are deferred until Functions source and a Functions emulator entry exist. Firestore rules are explicitly default-deny in Phase 1.
+The client connects Auth, Firestore, and Functions to emulators only when `EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true`. Firestore rules are least-privilege and deny all client writes to canonical data.
+
+Backend verification:
+
+```bash
+npm run build:functions
+npm run typecheck:functions
+npm run test:backend
+npm run test:rules
+```
+
+`npm run test:backend` builds Functions first, starts Auth/Firestore/Functions emulators with `demo-gatehood`, and runs Jest. It uses local `firebase-tools`; no global install is required.
+
+The `retryFanoutFailures` scheduled function runs every 5 minutes in UTC, processes unresolved retryable failures in bounded batches, and uses a Firestore lease to reduce overlapping executions. Internal retry helpers are not public callables. See `docs/PHASE2_ARCHITECTURE.md` for trade-offs.
 
 ## Folder structure
 
@@ -153,6 +167,14 @@ app.config.js
 firebase.json
 firestore.rules
 firestore.indexes.json
+docs/
+  PHASE2_ARCHITECTURE.md
+functions/
+  src/
+    domain/
+    services/
+    index.ts
+  test/
 src/
   app/
     _layout.tsx
@@ -172,22 +194,25 @@ Implemented:
 
 - Expo SDK 58 foundation
 - Expo Router root layout and landing screen
-- Strict TypeScript configuration
+- Strict TypeScript configuration for app and Functions
 - Validated client environment configuration
 - Firebase singleton initialization for app, auth, firestore, functions, and app-check
-- Emulator wiring for Auth and Firestore
-- App Check provider selection hooks
-- Default-deny Firestore rules
-- Foundational reusable UI components
-- Foundational tests and lint configuration
+- Emulator wiring for Auth, Firestore, and Functions
+- App Check provider selection hooks and enforced callable options
+- Least-privilege Firestore rules
+- Strict shared domain models and Zod validation
+- Callable invite redemption with hashed, single-use codes
+- Canonical notices with recipient fan-out, kind-scoped stable failure records, and scheduled retries
+- Idempotent pin propagation using the latest canonical state
+- Transactional first-read counting
+- Backend and security-rule emulator tests
+- Foundational reusable UI components and lint/test configuration
 
 Not implemented:
 
-- Authentication flows
-- Invite codes
-- CSV import
-- Notices, feeds, fan-out, or pinning
-- Read tracking
+- Authentication and invite screens
+- CSV import UI
+- Notice composer and feed UI
 - Offline queues
 - Builder or buyer dashboards
-- Cloud Functions
+- Firebase Hosting/deployment configuration beyond local emulators

@@ -5,8 +5,11 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorState } from '@/components/error-state';
+import { GuardLayout } from '@/components/guard-layout';
 import { getClientConfig } from '@/config/env';
 import { initializeFirebase } from '@/lib/firebase';
+import { AuthProvider } from '@/providers/auth-provider';
+import { MembershipProvider } from '@/providers/membership-provider';
 import { colors, spacing } from '@/theme';
 
 type BootResult =
@@ -35,12 +38,18 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <StatusBar style="light" />
         {boot.ok ? (
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: colors.background },
-            }}
-          />
+          <AuthProvider>
+            <MembershipProvider>
+              <GuardLayout>
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    contentStyle: { backgroundColor: colors.background },
+                  }}
+                />
+              </GuardLayout>
+            </MembershipProvider>
+          </AuthProvider>
         ) : (
           <View style={styles.errorContainer}>
             <ErrorState

@@ -53,3 +53,6 @@ coverage/
 # generated native folders
 /ios
 /android
+
+# generated Cloud Functions output
+functions/lib/
