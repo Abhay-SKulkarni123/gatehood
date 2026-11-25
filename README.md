@@ -1,13 +1,13 @@
 # Gatehood
 
-Gatehood is a React Native construction communication app. Phase 1 established the Expo/Firebase foundation with validated environment configuration, App Check wiring, emulator support, and strict TypeScript. Phase 2 added the backend foundation: Firestore schema and rules, strict domain models, callable Cloud Functions for invite redemption, notices, fan-out, pinning, and read tracking, plus emulator and security-rule tests. Phase 3 added Firebase Authentication, session-scoped membership resolution, protected Expo Router navigation, and minimal auth, onboarding, and access-confirmation screens. Phase 4 added trusted CSV import, invite generation, and notice read-status callables plus functional builder and buyer workflows.
+Gatehood is a React Native construction communication app. Phase 1 established the Expo/Firebase foundation with validated environment configuration, App Check wiring, emulator support, and strict TypeScript. Phase 2 added the backend foundation: Firestore schema and rules, strict domain models, callable Cloud Functions for invite redemption, notices, fan-out, pinning, and read tracking, plus emulator and security-rule tests. Phase 3 added Firebase Authentication, session-scoped membership resolution, protected Expo Router navigation, and minimal auth, onboarding, and access-confirmation screens. Phase 4 added trusted buyer CSV import, idempotent invite generation, bounded notice read-status retrieval, and functional builder and buyer workflows.
 
-Feature workflows now cover unit import and preview, invite generation, buyer joining, builder notice publishing and management, notice read status, and buyer notice feeds with first-read actions. Offline feed support, terminal-failure reconciliation, large-project pagination, and deployment configuration remain out of scope. See `docs/PHASE2_ARCHITECTURE.md` for the backend schema, flows, and guarantees.
+Feature workflows now cover buyer CSV preview/commit from a device file picker or pasted text, invite generation with active-invite reuse and explicit replacement, buyer joining, builder notice publishing and management, canonical read totals with sampled recipient detail, and buyer notice feeds ordered by pin state then delivery time. Imported name/phone details are stored in builder-only `buyerContacts`; buyer feeds never expose another buyer's contact information. Offline feed support, terminal-failure reconciliation, and deployment configuration remain out of scope. See `docs/PHASE2_ARCHITECTURE.md` for the backend schema, flows, and guarantees.
 
 ## Tech stack
 
 - Expo SDK 58 with Development Builds
-- Expo Router
+- Expo Router and `expo-file-system` for device CSV file selection/reading
 - React 19.3.0 and React Native 0.88.1
 - TypeScript strict mode
 - React Native Firebase 27.1.1: app, auth, firestore, functions, app-check
@@ -233,12 +233,13 @@ Implemented:
 - Pending-membership, access-denied, and membership-unavailable screens
   - Minimal builder and buyer access-confirmation placeholders
   - Foundational reusable UI components, auth/membership/route tests, and lint/test configuration
-  - Trusted CSV import preview/commit callables with bounded, all-or-nothing unit writes
-  - Builder-authorized invite generation that returns the code once and stores only its hash
-  - Builder-authorized notice read-status retrieval with bounded recipient detail
-  - Builder workspace with project stats, unit import, invite generation, buyer status, notice composer, pin management, and read-status views
-  - Buyer invite redemption screen and buyer notice feed with mark-as-read actions
-  - Typed callable wrappers and client repositories for Phase 4 workflows
+  - Trusted buyer CSV import preview/commit callables with bounded, all-or-nothing writes to towers, units, and builder-only buyer contacts
+  - Device CSV file selection plus client-side row validation before callable preview/commit
+  - Builder-authorized invite generation with transactional per-unit slots, active-invite reuse, explicit replacement/revocation, and plaintext returned only when newly created
+  - Builder-authorized notice read-status retrieval with paginated audience filtering, canonical totals, and explicitly labeled/truncated recipient samples
+  - Builder workspace with project stats, buyer import, invite generation/replacement, buyer status, notice composer, pin management, and read-status views
+  - Buyer invite redemption screen and buyer notice feed ordered by pin state then delivery time
+  - Typed callable wrappers, repositories, and pure client helpers for Phase 4 workflows
 
 Not implemented:
 

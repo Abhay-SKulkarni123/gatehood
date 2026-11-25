@@ -8,6 +8,12 @@ export const paths = {
   tower: (projectId: string, towerId: string): string => `projects/${projectId}/towers/${towerId}`,
   units: (projectId: string): string => `projects/${projectId}/units`,
   unit: (projectId: string, unitId: string): string => `projects/${projectId}/units/${unitId}`,
+  buyerContacts: (projectId: string): string => `projects/${projectId}/buyerContacts`,
+  buyerContact: (projectId: string, contactId: string): string =>
+    `projects/${projectId}/buyerContacts/${contactId}`,
+  inviteSlots: (projectId: string): string => `projects/${projectId}/inviteSlots`,
+  inviteSlot: (projectId: string, unitId: string): string =>
+    `projects/${projectId}/inviteSlots/${unitId}`,
   invites: (): string => 'invites',
   invite: (codeHash: string): string => `invites/${codeHash}`,
   notices: (projectId: string): string => `projects/${projectId}/notices`,

@@ -148,6 +148,7 @@ export async function seedInvite(options: {
     expiresAt,
     usedByUid: options.usedByUid ?? null,
     usedAt: options.usedByUid ? now : null,
+    revokedAt: null,
   });
 
   return codeHash;

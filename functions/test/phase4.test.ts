@@ -1,12 +1,14 @@
 import * as callableFunctions from '../src/index';
 import type {
+  BuyerImportResult,
   GenerateInviteResult,
+  NoticeAudience,
   NoticeReadStatusResult,
-  UnitImportResult,
 } from '../src/domain/types';
-import { db } from '../src/firestore';
+import { READ_STATUS_PAGE_SIZE } from '../src/config';
+import { db, timestampNow } from '../src/firestore';
 import { paths } from '../src/paths';
-import { hashInviteCode } from '../src/security';
+import { hashInviteCode, stableImportId } from '../src/security';
 import { normalizeInviteCode } from '../src/validation';
 import {
   BUILDER_UID,
@@ -14,20 +16,106 @@ import {
   BUYER_TWO_UID,
   PROJECT_ID,
   TOWER_ID,
+  TOWER_TWO_ID,
   UNIT_ONE_ID,
   UNIT_TWO_ID,
+  UNIT_THREE_ID,
   callableRequest,
   clearDatabase,
   seedBuyer,
   seedProject,
 } from './helpers';
 
-const importUnitsCallable = callableFunctions.importUnits.run;
+const importBuyersCallable = callableFunctions.importBuyers.run;
 const generateInviteCallable = callableFunctions.generateInvite.run;
 const getNoticeReadStatusCallable = callableFunctions.getNoticeReadStatus.run;
 const createNoticeCallable = callableFunctions.createNotice.run;
 const markNoticeReadCallable = callableFunctions.markNoticeRead.run;
 const redeemInviteCallable = callableFunctions.redeemInvite.run;
+
+function padded(index: number): string {
+  return String(index).padStart(3, '0');
+}
+
+async function seedMembers(
+  uids: readonly string[],
+  towerId: string,
+  unitId: string,
+): Promise<void> {
+  for (let offset = 0; offset < uids.length; offset += 200) {
+    const batch = db.batch();
+    for (const uid of uids.slice(offset, offset + 200)) {
+      batch.set(db.doc(paths.member(PROJECT_ID, uid)), {
+        uid,
+        projectId: PROJECT_ID,
+        role: 'buyer',
+        towerId,
+        unitId,
+        createdByUid: BUILDER_UID,
+        createdAt: timestampNow(),
+      });
+    }
+    await batch.commit();
+  }
+}
+
+async function seedNotice(
+  noticeId: string,
+  audience: NoticeAudience,
+  audienceCount: number,
+  readCount = 0,
+): Promise<void> {
+  const now = timestampNow();
+  const audienceFields =
+    audience.type === 'project'
+      ? { audienceType: 'project', audienceTowerIds: [], audienceUnitIds: [] }
+      : audience.type === 'tower'
+        ? { audienceType: 'tower', audienceTowerIds: audience.towerIds, audienceUnitIds: [] }
+        : { audienceType: 'unit', audienceTowerIds: [], audienceUnitIds: audience.unitIds };
+
+  await db.doc(paths.notice(PROJECT_ID, noticeId)).set({
+    id: noticeId,
+    projectId: PROJECT_ID,
+    title: 'Targeted update',
+    body: 'Targeted delivery details.',
+    ...audienceFields,
+    pinned: false,
+    createdByUid: BUILDER_UID,
+    createdAt: now,
+    updatedAt: now,
+    audienceCount,
+    readCount,
+    fanoutStatus: 'complete',
+    fanoutFailedCount: 0,
+    pinStatus: 'complete',
+    pinFailedCount: 0,
+  });
+}
+
+async function seedFeeds(
+  noticeId: string,
+  uids: readonly string[],
+  readUids: readonly string[] = [],
+): Promise<void> {
+  const now = timestampNow();
+  for (let offset = 0; offset < uids.length; offset += 200) {
+    const batch = db.batch();
+    for (const uid of uids.slice(offset, offset + 200)) {
+      batch.set(db.doc(paths.feed(uid, noticeId)), {
+        uid,
+        noticeId,
+        projectId: PROJECT_ID,
+        title: 'Targeted update',
+        body: 'Targeted delivery details.',
+        pinned: false,
+        deliveredAt: now,
+        updatedAt: now,
+        readAt: readUids.includes(uid) ? now : null,
+      });
+    }
+    await batch.commit();
+  }
+}
 
 describe('Phase 4 trusted operations', () => {
   beforeEach(async () => {
@@ -35,63 +123,107 @@ describe('Phase 4 trusted operations', () => {
     await seedProject();
   });
 
-  it('previews CSV rows without writing and commits them for a builder', async () => {
-    const csv = 'towerId,unitId,label\ntower-1,unit-4,Unit 104\n';
+  it('previews CSV without writing and commits buyer contacts deterministically', async () => {
+    const csv = 'Tower,Unit,Name,Phone\nTower 1,Unit 104,Asha,+1 555 0104\n';
+    const phone = '+15550104';
+    const contactId = stableImportId('contact', PROJECT_ID, phone);
 
-    const preview = (await importUnitsCallable(
+    const preview = (await importBuyersCallable(
       callableRequest({ projectId: PROJECT_ID, csv, dryRun: true }, BUILDER_UID),
-    )) as UnitImportResult;
+    )) as BuyerImportResult;
 
     expect(preview.dryRun).toBe(true);
     expect(preview.created).toBe(1);
     expect(preview.rows).toMatchObject([
-      { row: 2, towerId: TOWER_ID, unitId: 'unit-4', label: 'Unit 104', status: 'create' },
+      {
+        row: 2,
+        tower: 'Tower 1',
+        unit: 'Unit 104',
+        name: 'Asha',
+        phone,
+        status: 'create',
+      },
     ]);
-    expect((await db.doc(paths.unit(PROJECT_ID, 'unit-4')).get()).exists).toBe(false);
+    expect((await db.doc(paths.buyerContact(PROJECT_ID, contactId)).get()).exists).toBe(false);
 
-    const committed = (await importUnitsCallable(
+    const committed = (await importBuyersCallable(
       callableRequest({ projectId: PROJECT_ID, csv, dryRun: false }, BUILDER_UID),
-    )) as UnitImportResult;
+    )) as BuyerImportResult;
 
     expect(committed.complete).toBe(true);
     expect(committed.created).toBe(1);
-    const unit = await db.doc(paths.unit(PROJECT_ID, 'unit-4')).get();
-    expect(unit.data()).toMatchObject({
-      id: 'unit-4',
+    const contact = await db.doc(paths.buyerContact(PROJECT_ID, contactId)).get();
+    expect(contact.data()).toMatchObject({
+      id: contactId,
       projectId: PROJECT_ID,
       towerId: TOWER_ID,
-      label: 'Unit 104',
+      name: 'Asha',
+      phone,
+      importedByUid: BUILDER_UID,
     });
+    const units = await db
+      .collection(paths.units(PROJECT_ID))
+      .where('towerId', '==', TOWER_ID)
+      .where('label', '==', 'Unit 104')
+      .get();
+    expect(units.size).toBe(1);
   });
 
-  it('reports invalid CSV rows and refuses to commit them', async () => {
-    const csv = 'towerId,unitId,label\nmissing-tower,unit-4,Bad unit\n';
+  it('reports invalid CSV rows and refuses any partial commit', async () => {
+    const csv =
+      'Tower,Unit,Name,Phone\nTower 1,Unit 105,Meera,+15550105\nTower 1,Unit 106,Bad Phone,123\n';
 
-    const preview = (await importUnitsCallable(
+    const preview = (await importBuyersCallable(
       callableRequest({ projectId: PROJECT_ID, csv, dryRun: true }, BUILDER_UID),
-    )) as UnitImportResult;
+    )) as BuyerImportResult;
 
     expect(preview.failed).toBe(1);
     expect(preview.complete).toBe(false);
-    expect(preview.rows[0].status).toBe('error');
-    expect(preview.rows[0].message).toContain('Tower');
+    expect(preview.rows[1]).toMatchObject({ row: 3, status: 'error' });
+    expect(preview.rows[1].message).toContain('Phone');
 
     await expect(
-      importUnitsCallable(callableRequest({ projectId: PROJECT_ID, csv }, BUILDER_UID)),
+      importBuyersCallable(callableRequest({ projectId: PROJECT_ID, csv }, BUILDER_UID)),
     ).rejects.toMatchObject({ code: 'invalid-argument' });
-    expect((await db.doc(paths.unit(PROJECT_ID, 'unit-4')).get()).exists).toBe(false);
+    expect((await db.collection(paths.buyerContacts(PROJECT_ID)).get()).empty).toBe(true);
+    const units = await db
+      .collection(paths.units(PROJECT_ID))
+      .where('label', '==', 'Unit 105')
+      .get();
+    expect(units.empty).toBe(true);
+  });
+
+  it('treats an identical import as unchanged', async () => {
+    const csv = 'Tower,Unit,Name,Phone\nTower 1,Unit 107,Arjun,+15550107\n';
+    const request = callableRequest({ projectId: PROJECT_ID, csv }, BUILDER_UID);
+
+    const first = (await importBuyersCallable(request)) as BuyerImportResult;
+    const second = (await importBuyersCallable(request)) as BuyerImportResult;
+
+    expect(first.created).toBe(1);
+    expect(second.created).toBe(0);
+    expect(second.unchanged).toBe(1);
+    expect(second.complete).toBe(true);
   });
 
   it('generates a single-use invite whose plaintext code is returned once and stored as a hash', async () => {
     const generated = (await generateInviteCallable(
       callableRequest(
-        { projectId: PROJECT_ID, towerId: TOWER_ID, unitId: UNIT_ONE_ID, expiresInHours: 24 },
+        {
+          projectId: PROJECT_ID,
+          towerId: TOWER_ID,
+          unitId: UNIT_ONE_ID,
+          expiresInHours: 24,
+          regenerate: false,
+        },
         BUILDER_UID,
       ),
     )) as GenerateInviteResult;
 
     expect(generated.code).toMatch(/^[A-F0-9]{24}$/);
-    const codeHash = hashInviteCode(normalizeInviteCode(generated.code));
+    expect(generated.codeAvailable).toBe(true);
+    expect(generated.reused).toBe(false);
+    const codeHash = hashInviteCode(normalizeInviteCode(generated.code as string));
     const invite = await db.doc(paths.invite(codeHash)).get();
     expect(invite.data()).toMatchObject({
       projectId: PROJECT_ID,
@@ -101,6 +233,7 @@ describe('Phase 4 trusted operations', () => {
       createdByUid: BUILDER_UID,
       usedByUid: null,
       usedAt: null,
+      revokedAt: null,
     });
 
     const redeemed = await redeemInviteCallable(
@@ -108,6 +241,66 @@ describe('Phase 4 trusted operations', () => {
     );
     expect(redeemed.projectId).toBe(PROJECT_ID);
     expect((await db.doc(paths.invite(codeHash)).get()).data()?.usedByUid).toBe(BUYER_ONE_UID);
+  });
+
+  it('reuses active invites and revokes the previous code on explicit regeneration', async () => {
+    const requestData = {
+      projectId: PROJECT_ID,
+      towerId: TOWER_ID,
+      unitId: UNIT_ONE_ID,
+      expiresInHours: 24,
+    };
+    const first = (await generateInviteCallable(
+      callableRequest({ ...requestData, regenerate: false }, BUILDER_UID),
+    )) as GenerateInviteResult;
+    const reused = (await generateInviteCallable(
+      callableRequest({ ...requestData, regenerate: false }, BUILDER_UID),
+    )) as GenerateInviteResult;
+
+    expect(first.codeAvailable).toBe(true);
+    expect(reused).toMatchObject({ code: null, codeAvailable: false, reused: true });
+    const firstHash = hashInviteCode(normalizeInviteCode(first.code as string));
+    const slot = await db.doc(paths.inviteSlot(PROJECT_ID, UNIT_ONE_ID)).get();
+    expect(slot.data()).toMatchObject({ codeHash: firstHash, unitId: UNIT_ONE_ID });
+
+    const replacement = (await generateInviteCallable(
+      callableRequest({ ...requestData, regenerate: true }, BUILDER_UID),
+    )) as GenerateInviteResult;
+    expect(replacement.codeAvailable).toBe(true);
+    expect(replacement.code).not.toBe(first.code);
+    expect((await db.doc(paths.invite(firstHash)).get()).data()?.revokedAt).not.toBeNull();
+
+    await expect(
+      redeemInviteCallable(callableRequest({ code: first.code }, BUYER_ONE_UID)),
+    ).rejects.toMatchObject({ code: 'invalid-argument' });
+    const redeemed = await redeemInviteCallable(
+      callableRequest({ code: replacement.code }, BUYER_ONE_UID),
+    );
+    expect(redeemed.unitId).toBe(UNIT_ONE_ID);
+  });
+
+  it('creates only one invite for concurrent identical requests', async () => {
+    const data = {
+      projectId: PROJECT_ID,
+      towerId: TOWER_ID,
+      unitId: UNIT_ONE_ID,
+      expiresInHours: 24,
+      regenerate: false,
+    };
+
+    const results = (await Promise.all([
+      generateInviteCallable(callableRequest(data, BUILDER_UID)),
+      generateInviteCallable(callableRequest(data, BUILDER_UID)),
+    ])) as GenerateInviteResult[];
+
+    expect(results.filter((result) => result.codeAvailable)).toHaveLength(1);
+    expect(results.filter((result) => result.reused)).toHaveLength(1);
+    const invites = await db
+      .collection('invites')
+      .where('projectId', '==', PROJECT_ID)
+      .where('unitId', '==', UNIT_ONE_ID)
+      .get();
+    expect(invites.size).toBe(1);
   });
 
   it('reports notice delivery and first-read status to builders only', async () => {
@@ -131,10 +324,11 @@ describe('Phase 4 trusted operations', () => {
     );
     const before = (await getNoticeReadStatusCallable(request)) as NoticeReadStatusResult;
 
-    expect(before.recipientCount).toBe(2);
-    expect(before.deliveredCount).toBe(2);
-    expect(before.unreadCount).toBe(2);
+    expect(before.sampleRecipientCount).toBe(2);
+    expect(before.sampleDeliveredUnreadCount).toBe(2);
+    expect(before.sampleReadCount).toBe(0);
     expect(before.readCount).toBe(0);
+    expect(before.truncated).toBe(false);
 
     await markNoticeReadCallable(
       callableRequest(
@@ -145,7 +339,8 @@ describe('Phase 4 trusted operations', () => {
 
     const after = (await getNoticeReadStatusCallable(request)) as NoticeReadStatusResult;
     expect(after.readCount).toBe(1);
-    expect(after.unreadCount).toBe(1);
+    expect(after.sampleReadCount).toBe(1);
+    expect(after.sampleDeliveredUnreadCount).toBe(1);
     expect(after.recipients.find((recipient) => recipient.uid === BUYER_ONE_UID)).toMatchObject({
       delivered: true,
       read: true,
@@ -157,11 +352,58 @@ describe('Phase 4 trusted operations', () => {
     });
   });
 
-  it('rejects unauthenticated and non-builder callers', async () => {
-    const csv = 'towerId,unitId,label\ntower-1,unit-4,Unit 104\n';
-    const inviteData = { projectId: PROJECT_ID, towerId: TOWER_ID, unitId: UNIT_ONE_ID };
+  it('finds targeted recipients beyond the first membership page', async () => {
+    const ineligibleUids = Array.from({ length: READ_STATUS_PAGE_SIZE }, (_, index) =>
+      `buyer-${padded(index)}`,
+    );
+    const eligibleUids = Array.from({ length: 50 }, (_, index) =>
+      `buyer-${padded(READ_STATUS_PAGE_SIZE + index)}`,
+    );
+    await seedMembers(ineligibleUids, TOWER_TWO_ID, UNIT_THREE_ID);
+    await seedMembers(eligibleUids, TOWER_ID, UNIT_ONE_ID);
+    await seedNotice('notice-target', { type: 'tower', towerIds: [TOWER_ID] }, 50);
+    await seedFeeds('notice-target', eligibleUids);
 
-    await expect(importUnitsCallable(callableRequest({ projectId: PROJECT_ID, csv }))).rejects.toMatchObject({
+    const status = (await getNoticeReadStatusCallable(
+      callableRequest({ projectId: PROJECT_ID, noticeId: 'notice-target' }, BUILDER_UID),
+    )) as NoticeReadStatusResult;
+
+    expect(status.audienceCount).toBe(50);
+    expect(status.sampleRecipientCount).toBe(50);
+    expect(status.sampleDeliveredUnreadCount).toBe(50);
+    expect(status.truncated).toBe(false);
+    expect(status.recipients.every((recipient) => recipient.towerId === TOWER_ID)).toBe(true);
+  });
+
+  it('keeps canonical totals separate from truncated read-status samples', async () => {
+    const uids = Array.from({ length: READ_STATUS_PAGE_SIZE + 50 }, (_, index) =>
+      `buyer-${padded(index)}`,
+    );
+    await seedMembers(uids, TOWER_ID, UNIT_ONE_ID);
+    await seedNotice('notice-large', { type: 'project' }, uids.length, 1);
+    await seedFeeds('notice-large', [uids[uids.length - 1]], [uids[uids.length - 1]]);
+
+    const status = (await getNoticeReadStatusCallable(
+      callableRequest({ projectId: PROJECT_ID, noticeId: 'notice-large' }, BUILDER_UID),
+    )) as NoticeReadStatusResult;
+
+    expect(status.audienceCount).toBe(READ_STATUS_PAGE_SIZE + 50);
+    expect(status.readCount).toBe(1);
+    expect(status.sampleRecipientCount).toBe(READ_STATUS_PAGE_SIZE);
+    expect(status.sampleReadCount).toBe(0);
+    expect(status.sampleNotDeliveredCount).toBe(READ_STATUS_PAGE_SIZE);
+    expect(status.truncated).toBe(true);
+  });
+
+  it('rejects unauthenticated and non-builder callers', async () => {
+    const csv = 'Tower,Unit,Name,Phone\nTower 1,Unit 108,Neha,+15550108\n';
+    const inviteData = {
+      projectId: PROJECT_ID,
+      towerId: TOWER_ID,
+      unitId: UNIT_ONE_ID,
+    };
+
+    await expect(importBuyersCallable(callableRequest({ projectId: PROJECT_ID, csv }))).rejects.toMatchObject({
       code: 'unauthenticated',
     });
     await expect(generateInviteCallable(callableRequest(inviteData))).rejects.toMatchObject({
@@ -174,7 +416,7 @@ describe('Phase 4 trusted operations', () => {
     await seedBuyer(BUYER_ONE_UID, UNIT_ONE_ID, TOWER_ID);
 
     await expect(
-      importUnitsCallable(callableRequest({ projectId: PROJECT_ID, csv }, BUYER_ONE_UID)),
+      importBuyersCallable(callableRequest({ projectId: PROJECT_ID, csv }, BUYER_ONE_UID)),
     ).rejects.toMatchObject({ code: 'permission-denied' });
     await expect(
       generateInviteCallable(callableRequest(inviteData, BUYER_ONE_UID)),

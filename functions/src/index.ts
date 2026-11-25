@@ -15,15 +15,15 @@ import {
   generateInvite as generateInviteService,
   redeemInvite as redeemInviteService,
 } from './services/invite';
-import { importUnits as importUnitsService } from './services/units';
+import { importBuyers as importBuyersService } from './services/units';
 import {
+  parseBuyerImport,
   parseCreateNotice,
   parseGenerateInvite,
   parseMarkNoticeRead,
   parseNoticeReadStatus,
   parseRedeemInvite,
   parseSetNoticePinned,
-  parseUnitImport,
 } from './validation';
 
 const callableOptions = {
@@ -74,12 +74,12 @@ export const markNoticeRead = onCall(callableOptions, async (request) => {
   }
 });
 
-export const importUnits = onCall(callableOptions, async (request) => {
+export const importBuyers = onCall(callableOptions, async (request) => {
   try {
     const uid = requireUid(request);
-    const data = parseUnitImport(request.data);
+    const data = parseBuyerImport(request.data);
     await requireBuilder(data.projectId, uid);
-    return await importUnitsService(data.projectId, data);
+    return await importBuyersService(uid, data);
   } catch (error) {
     throw asHttpsError(error);
   }

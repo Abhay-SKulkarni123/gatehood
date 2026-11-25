@@ -1,12 +1,14 @@
 import { randomBytes } from 'crypto';
 import { Timestamp } from 'firebase-admin/firestore';
 import type { DocumentSnapshot } from 'firebase-admin/firestore';
+import { HttpsError } from 'firebase-functions/v2/https';
 import type {
   GenerateInviteData,
   GenerateInviteResult,
   RedeemInviteData,
   RedeemInviteResult,
 } from '../domain/types';
+import { INVITE_COLLISION_ATTEMPTS } from '../config';
 import { internal, invalidInvite } from '../errors';
 import { backfillBuyer } from '../fanout';
 import { db, timestampNow } from '../firestore';
@@ -15,6 +17,7 @@ import { hashInviteCode } from '../security';
 import {
   normalizeInviteCode,
   parseInvite,
+  parseInviteSlot,
   parseMembership,
   parseProject,
   parseTower,
@@ -33,6 +36,11 @@ function parseDocument<T>(
   return parser({ ...toRecord(snapshot.data()), id });
 }
 
+type GenerateOutcome =
+  | { type: 'created'; code: string; expiresAt: string }
+  | { type: 'reused'; expiresAt: string }
+  | { type: 'collision' };
+
 export async function generateInvite(
   builderUid: string,
   data: GenerateInviteData,
@@ -44,23 +52,61 @@ export async function generateInvite(
   const unitSnapshot = await db.doc(paths.unit(data.projectId, data.unitId)).get();
   const unit = parseDocument(unitSnapshot, parseUnit, data.unitId);
 
-  if (tower.projectId !== data.projectId || unit.projectId !== data.projectId || unit.towerId !== data.towerId) {
+  if (
+    tower.projectId !== data.projectId ||
+    unit.projectId !== data.projectId ||
+    unit.towerId !== data.towerId
+  ) {
     throw invalidInvite();
   }
 
-  const expiresAt = Timestamp.fromMillis(Date.now() + data.expiresInHours * 60 * 60 * 1000);
-  const createdAt = timestampNow();
+  const slotRef = db.doc(paths.inviteSlot(data.projectId, data.unitId));
+  const now = timestampNow();
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const code = randomBytes(12).toString('hex').toUpperCase();
-    const codeHash = hashInviteCode(normalizeInviteCode(code));
-    const inviteRef = db.doc(paths.invite(codeHash));
+  for (let attempt = 0; attempt < INVITE_COLLISION_ATTEMPTS; attempt += 1) {
+    const outcome = await db.runTransaction(async (transaction): Promise<GenerateOutcome> => {
+      const slotSnapshot = await transaction.get(slotRef);
+      let previousHash: string | null = null;
+      let active = false;
 
-    const committed = await db.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(inviteRef);
-      if (snapshot.exists) {
-        return false;
+      if (slotSnapshot.exists) {
+        try {
+          const slot = parseInviteSlot({ ...toRecord(slotSnapshot.data()), id: slotSnapshot.id });
+          if (
+            slot.projectId !== data.projectId ||
+            slot.towerId !== data.towerId ||
+            slot.unitId !== data.unitId
+          ) {
+            throw internal();
+          }
+          previousHash = slot.codeHash;
+          active =
+            slot.usedAt === null &&
+            slot.revokedAt === null &&
+            slot.expiresAt.toMillis() > now.toMillis();
+          if (active && !data.regenerate) {
+            return { type: 'reused', expiresAt: slot.expiresAt.toDate().toISOString() };
+          }
+        } catch (error) {
+          if (error instanceof HttpsError) {
+            throw error;
+          }
+          throw internal();
+        }
       }
+
+      const code = randomBytes(12).toString('hex').toUpperCase();
+      const codeHash = hashInviteCode(normalizeInviteCode(code));
+      const inviteRef = db.doc(paths.invite(codeHash));
+      if ((await transaction.get(inviteRef)).exists) {
+        return { type: 'collision' };
+      }
+
+      const expiresAt = Timestamp.fromMillis(Date.now() + data.expiresInHours * 60 * 60 * 1000);
+      if (active && data.regenerate && previousHash) {
+        transaction.update(db.doc(paths.invite(previousHash)), { revokedAt: now });
+      }
+
       transaction.set(inviteRef, {
         id: codeHash,
         projectId: data.projectId,
@@ -68,21 +114,49 @@ export async function generateInvite(
         unitId: data.unitId,
         codeHash,
         createdByUid: builderUid,
-        createdAt,
+        createdAt: now,
         expiresAt,
         usedByUid: null,
         usedAt: null,
+        revokedAt: null,
       });
-      return true;
-    });
-
-    if (committed) {
-      return {
-        code,
+      transaction.set(slotRef, {
+        id: data.unitId,
         projectId: data.projectId,
         towerId: data.towerId,
         unitId: data.unitId,
-        expiresAt: expiresAt.toDate().toISOString(),
+        codeHash,
+        createdByUid: builderUid,
+        createdAt: now,
+        expiresAt,
+        usedByUid: null,
+        usedAt: null,
+        revokedAt: null,
+      });
+
+      return { type: 'created', code, expiresAt: expiresAt.toDate().toISOString() };
+    });
+
+    if (outcome.type === 'created') {
+      return {
+        code: outcome.code,
+        codeAvailable: true,
+        reused: false,
+        projectId: data.projectId,
+        towerId: data.towerId,
+        unitId: data.unitId,
+        expiresAt: outcome.expiresAt,
+      };
+    }
+    if (outcome.type === 'reused') {
+      return {
+        code: null,
+        codeAvailable: false,
+        reused: true,
+        projectId: data.projectId,
+        towerId: data.towerId,
+        unitId: data.unitId,
+        expiresAt: outcome.expiresAt,
       };
     }
   }
@@ -109,6 +183,9 @@ export async function redeemInvite(
       throw invalidInvite();
     }
     if (invite.expiresAt.toMillis() <= now.toMillis()) {
+      throw invalidInvite();
+    }
+    if (invite.revokedAt !== null) {
       throw invalidInvite();
     }
     if (invite.usedByUid !== null && invite.usedByUid !== uid) {

@@ -49,6 +49,15 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /buyerContacts/{contactId} {
+        allow read: if isRole(projectId, 'builder');
+        allow write: if false;
+      }
+
+      match /inviteSlots/{unitId} {
+        allow read, write: if false;
+      }
+
       match /notices/{noticeId} {
         allow read: if isMember(projectId);
         allow write: if false;

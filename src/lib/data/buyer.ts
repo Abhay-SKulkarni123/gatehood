@@ -2,6 +2,7 @@ import { collection, getDocs } from '@react-native-firebase/firestore';
 import type { Firestore } from '@react-native-firebase/firestore';
 import type { FeedEntryDoc } from '@/types/domain';
 import { isFeedEntryDoc } from './parse';
+import { sortBuyerFeed } from './sort';
 
 export async function loadBuyerFeed(
   firestore: Firestore,
@@ -14,15 +15,5 @@ export async function loadBuyerFeed(
     return isFeedEntryDoc(value, uid, document.id) && value.projectId === projectId ? [value] : [];
   });
 
-  entries.sort((first, second) => {
-    if (first.pinned !== second.pinned) {
-      return first.pinned ? -1 : 1;
-    }
-    if ((first.readAt === null) !== (second.readAt === null)) {
-      return first.readAt === null ? -1 : 1;
-    }
-    return second.deliveredAt.toMillis() - first.deliveredAt.toMillis();
-  });
-
-  return entries;
+  return sortBuyerFeed(entries);
 }

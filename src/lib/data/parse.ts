@@ -1,4 +1,5 @@
 import type {
+  BuyerContactDoc,
   FeedEntryDoc,
   FirestoreTimestamp,
   NoticeDoc,
@@ -73,6 +74,23 @@ export function isUnitDoc(value: unknown, id: string): value is UnitDoc {
     isNonEmptyString(value.towerId) &&
     isNonEmptyString(value.label) &&
     isFirestoreTimestamp(value.createdAt)
+  );
+}
+
+export function isBuyerContactDoc(value: unknown, id: string): value is BuyerContactDoc {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    value.id === id &&
+    isNonEmptyString(value.projectId) &&
+    isNonEmptyString(value.towerId) &&
+    isNonEmptyString(value.unitId) &&
+    isNonEmptyString(value.name) &&
+    isNonEmptyString(value.phone) &&
+    isNonEmptyString(value.importedByUid) &&
+    isFirestoreTimestamp(value.importedAt) &&
+    isFirestoreTimestamp(value.updatedAt)
   );
 }
 

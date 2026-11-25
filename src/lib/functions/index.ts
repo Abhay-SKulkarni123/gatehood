@@ -11,10 +11,10 @@ import type {
   NoticeReadStatusResult,
   RedeemInviteData,
   RedeemInviteResult,
+  BuyerImportData,
+  BuyerImportResult,
   SetNoticePinnedData,
   SetNoticePinnedResult,
-  UnitImportData,
-  UnitImportResult,
 } from '@/types/domain';
 
 async function invoke<Request, Response>(
@@ -57,11 +57,11 @@ export function callMarkNoticeRead(
   return invoke<MarkNoticeReadData, MarkNoticeReadResult>(functions, 'markNoticeRead', data);
 }
 
-export function callImportUnits(
+export function callImportBuyers(
   functions: Functions,
-  data: UnitImportData,
-): Promise<UnitImportResult> {
-  return invoke<UnitImportData, UnitImportResult>(functions, 'importUnits', data);
+  data: BuyerImportData,
+): Promise<BuyerImportResult> {
+  return invoke<BuyerImportData, BuyerImportResult>(functions, 'importBuyers', data);
 }
 
 export function callGenerateInvite(

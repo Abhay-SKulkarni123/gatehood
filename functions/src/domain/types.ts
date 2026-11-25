@@ -60,6 +60,18 @@ export interface UnitDoc {
   createdAt: FirestoreTimestamp;
 }
 
+export interface BuyerContactDoc {
+  id: string;
+  projectId: string;
+  towerId: string;
+  unitId: string;
+  name: string;
+  phone: string;
+  importedByUid: string;
+  importedAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
+}
+
 export interface InviteDoc {
   id: string;
   projectId: string;
@@ -71,6 +83,21 @@ export interface InviteDoc {
   expiresAt: FirestoreTimestamp;
   usedByUid: string | null;
   usedAt: FirestoreTimestamp | null;
+  revokedAt: FirestoreTimestamp | null;
+}
+
+export interface InviteSlotDoc {
+  id: string;
+  projectId: string;
+  towerId: string;
+  unitId: string;
+  codeHash: string;
+  createdByUid: string;
+  createdAt: FirestoreTimestamp;
+  expiresAt: FirestoreTimestamp;
+  usedByUid: string | null;
+  usedAt: FirestoreTimestamp | null;
+  revokedAt: FirestoreTimestamp | null;
 }
 
 export interface NoticeDoc {
@@ -135,24 +162,25 @@ export interface FanoutStats {
   complete: boolean;
 }
 
-export interface UnitImportData {
+export interface BuyerImportData {
   projectId: string;
   csv: string;
   dryRun: boolean;
 }
 
-export interface UnitImportRow {
+export interface BuyerImportRow {
   row: number;
-  towerId: string;
-  unitId: string;
-  label: string;
+  tower: string;
+  unit: string;
+  name: string;
+  phone: string;
   status: 'create' | 'unchanged' | 'error';
   message: string | null;
 }
 
-export interface UnitImportResult {
+export interface BuyerImportResult {
   dryRun: boolean;
-  rows: UnitImportRow[];
+  rows: BuyerImportRow[];
   created: number;
   unchanged: number;
   failed: number;
@@ -164,10 +192,13 @@ export interface GenerateInviteData {
   towerId: string;
   unitId: string;
   expiresInHours: number;
+  regenerate: boolean;
 }
 
 export interface GenerateInviteResult {
-  code: string;
+  code: string | null;
+  codeAvailable: boolean;
+  reused: boolean;
   projectId: string;
   towerId: string;
   unitId: string;
@@ -192,9 +223,10 @@ export interface NoticeReadStatusResult {
   noticeId: string;
   audienceCount: number;
   readCount: number;
-  deliveredCount: number;
-  unreadCount: number;
-  recipientCount: number;
+  sampleRecipientCount: number;
+  sampleReadCount: number;
+  sampleDeliveredUnreadCount: number;
+  sampleNotDeliveredCount: number;
   truncated: boolean;
   recipients: NoticeReadStatusRecipient[];
 }

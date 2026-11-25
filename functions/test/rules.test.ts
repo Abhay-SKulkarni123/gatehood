@@ -52,6 +52,17 @@ describe('Firestore security rules', () => {
     await seedBuyer(BUYER_ONE_UID, 'unit-1');
     await seedBuyer(BUYER_TWO_UID, 'unit-2');
     await seedFeed(BUYER_ONE_UID);
+    await db.doc(paths.buyerContact(PROJECT_ID, 'contact-1')).set({
+      id: 'contact-1',
+      projectId: PROJECT_ID,
+      towerId: 'tower-1',
+      unitId: 'unit-1',
+      name: 'Asha',
+      phone: '+15550104',
+      importedByUid: BUILDER_UID,
+      importedAt: timestampNow(),
+      updatedAt: timestampNow(),
+    });
   });
 
   afterAll(async () => {
@@ -96,12 +107,29 @@ describe('Firestore security rules', () => {
     await assertFails(anonymousDb.doc(paths.project(PROJECT_ID)).get());
   });
 
-  it('denies all client access to invite documents', async () => {
+  it('allows builders but not buyers to read imported buyer contacts', async () => {
     const builderDb = testEnv.authenticatedContext(BUILDER_UID).firestore();
+    const buyerDb = testEnv.authenticatedContext(BUYER_ONE_UID).firestore();
+    await assertSucceeds(builderDb.doc(paths.buyerContact(PROJECT_ID, 'contact-1')).get());
+    await assertFails(buyerDb.doc(paths.buyerContact(PROJECT_ID, 'contact-1')).get());
+    await assertFails(
+      builderDb.doc(paths.buyerContact(PROJECT_ID, 'contact-1')).update({ name: 'Changed' }),
+    );
+  });
+
+  it('denies all client access to invite documents and invite slots', async () => {
+    const builderDb = testEnv.authenticatedContext(BUILDER_UID).firestore();
+    const buyerDb = testEnv.authenticatedContext(BUYER_ONE_UID).firestore();
     await assertFails(builderDb.doc(paths.invite('a'.repeat(64))).get());
     await assertFails(
       builderDb.doc(paths.invite('b'.repeat(64))).set({
         codeHash: 'b'.repeat(64),
+      }),
+    );
+    await assertFails(buyerDb.doc(paths.inviteSlot(PROJECT_ID, 'unit-1')).get());
+    await assertFails(
+      builderDb.doc(paths.inviteSlot(PROJECT_ID, 'unit-1')).set({
+        codeHash: 'c'.repeat(64),
       }),
     );
   });

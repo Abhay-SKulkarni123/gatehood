@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { File } from 'expo-file-system';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { ChoiceChip } from '@/components/choice-chip';
 import { EmptyState } from '@/components/empty-state';
@@ -8,6 +9,7 @@ import { LoadingIndicator } from '@/components/loading-indicator';
 import { PrimaryButton } from '@/components/primary-button';
 import { Screen } from '@/components/screen';
 import { getClientConfig } from '@/config/env';
+import { validateBuyerCsv } from '@/lib/csv/buyer-import';
 import type { BuilderSnapshot } from '@/lib/data/builder';
 import { loadBuilderSnapshot } from '@/lib/data/builder';
 import {
@@ -15,18 +17,19 @@ import {
   callCreateNotice,
   callGenerateInvite,
   callGetNoticeReadStatus,
-  callImportUnits,
+  callImportBuyers,
   callSetNoticePinned,
 } from '@/lib/functions';
 import { getFirebaseServices } from '@/lib/firebase';
 import { useAuth } from '@/providers/auth-provider';
 import type {
+  BuyerContactDoc,
+  BuyerImportResult,
   FirestoreTimestamp,
   GenerateInviteResult,
   NoticeAudience,
   NoticeDoc,
   NoticeReadStatusResult,
-  UnitImportResult,
 } from '@/types/domain';
 import { colors, radius, spacing, typography } from '@/theme';
 import { parseIdList } from '@/utils/identifiers';
@@ -61,7 +64,9 @@ export default function BuilderHomeScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [csv, setCsv] = useState('');
-  const [importPreview, setImportPreview] = useState<UnitImportResult | null>(null);
+  const [csvFileName, setCsvFileName] = useState<string | null>(null);
+  const [clientCsvErrors, setClientCsvErrors] = useState<string[]>([]);
+  const [importPreview, setImportPreview] = useState<BuyerImportResult | null>(null);
   const [generatedInvite, setGeneratedInvite] = useState<GenerateInviteResult | null>(null);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -151,13 +156,50 @@ export default function BuilderHomeScreen() {
       ),
     [snapshot],
   );
+  const contactsByUnit = useMemo(() => {
+    const grouped = new Map<string, BuyerContactDoc[]>();
+    for (const contact of snapshot?.buyerContacts ?? []) {
+      const list = grouped.get(contact.unitId) ?? [];
+      list.push(contact);
+      grouped.set(contact.unitId, list);
+    }
+    return grouped;
+  }, [snapshot]);
+
+  const applyCsv = (value: string, fileName: string | null = null) => {
+    const validation = validateBuyerCsv(value);
+    setCsv(value);
+    setCsvFileName(fileName);
+    setClientCsvErrors(validation.errors);
+    setImportPreview(null);
+  };
+
+  const handlePickCsv = async () => {
+    setBusy('csv-pick');
+    setError(null);
+    setMessage(null);
+    try {
+      const picked = await File.pickFileAsync({
+        mimeTypes: ['text/csv', 'text/plain', 'application/vnd.ms-excel'],
+      });
+      if (!picked.canceled) {
+        const file = picked.result;
+        applyCsv(await file.text(), file.name);
+        setMessage(`Loaded ${file.name}. Review the preview before importing.`);
+      }
+    } catch (pickError) {
+      setError(describeCallableError(pickError));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const handleImport = async (dryRun: boolean) => {
     setBusy(dryRun ? 'import-preview' : 'import');
     setError(null);
     setMessage(null);
     try {
-      const result = await callImportUnits(getFirebaseServices().functions, {
+      const result = await callImportBuyers(getFirebaseServices().functions, {
         projectId: constructionProjectId,
         csv,
         dryRun,
@@ -166,8 +208,11 @@ export default function BuilderHomeScreen() {
       if (dryRun) {
         setMessage('Preview ready. Review each row before importing.');
       } else {
-        setCsv('');
-        setMessage(`${result.created} unit${result.created === 1 ? '' : 's'} imported.`);
+        applyCsv('');
+        setMessage(
+          `${result.created} buyer contact${result.created === 1 ? '' : 's'} imported; ` +
+            `${result.unchanged} unchanged.`,
+        );
         await refresh();
       }
     } catch (importError) {
@@ -177,20 +222,36 @@ export default function BuilderHomeScreen() {
     }
   };
 
-  const handleGenerateInvite = async (towerId: string, unitId: string) => {
+  const handleGenerateInvite = async (
+    towerId: string,
+    unitId: string,
+    regenerate = false,
+  ) => {
     const result = await runAction(
-      `invite:${unitId}`,
+      regenerate ? `replace-invite:${unitId}` : `invite:${unitId}`,
       () =>
         callGenerateInvite(getFirebaseServices().functions, {
           projectId: constructionProjectId,
           towerId,
           unitId,
           expiresInHours: 168,
+          regenerate,
         }),
-      'Invite generated. Share the code now; it is not stored in plaintext.',
     );
-    if (result) {
-      setGeneratedInvite(result);
+    if (!result) {
+      return;
+    }
+    setGeneratedInvite(result);
+    if (result.codeAvailable) {
+      setMessage(
+        regenerate
+          ? 'Previous invite revoked. Share the new code now; it is not stored in plaintext.'
+          : 'Invite generated. Share the code now; it is not stored in plaintext.',
+      );
+    } else {
+      setMessage(
+        'An active invite already exists. Its code cannot be recovered; replace it to get a new code.',
+      );
     }
   };
 
@@ -213,13 +274,22 @@ export default function BuilderHomeScreen() {
           body: body.trim(),
           audience,
         }),
-      'Notice published.',
     );
-    if (result) {
-      setTitle('');
-      setBody('');
-      setAudienceIds('');
+    if (!result) {
+      return;
     }
+    if (result.fanoutStatus === 'complete') {
+      setMessage(`Notice published to all ${result.audienceCount} eligible buyers.`);
+    } else if (result.fanoutStatus === 'partial') {
+      setMessage(
+        `Notice published with ${result.fanoutFailedCount} delivery failure(s); retry is pending.`,
+      );
+    } else {
+      setMessage('Notice created, but delivery did not complete; retry is pending.');
+    }
+    setTitle('');
+    setBody('');
+    setAudienceIds('');
   };
 
   const handleReadStatus = async (noticeId: string) => {
@@ -236,6 +306,29 @@ export default function BuilderHomeScreen() {
       setError(describeCallableError(statusError));
     } finally {
       setBusy(null);
+    }
+  };
+
+  const handleTogglePin = async (notice: NoticeDoc) => {
+    const result = await runAction(`pin:${notice.id}`, () =>
+      callSetNoticePinned(getFirebaseServices().functions, {
+        projectId: constructionProjectId,
+        noticeId: notice.id,
+        pinned: !notice.pinned,
+      }),
+    );
+    if (!result) {
+      return;
+    }
+    const label = result.pinned ? 'pinned' : 'unpinned';
+    if (result.pinStatus === 'complete') {
+      setMessage(`Notice ${label} across all delivered feeds.`);
+    } else if (result.pinStatus === 'partial') {
+      setMessage(
+        `Canonical notice ${label}, but ${result.pinFailedCount} feed update(s) failed; retry is pending.`,
+      );
+    } else {
+      setMessage(`Canonical notice ${label}, but pin propagation failed; retry is pending.`);
     }
   };
 
@@ -294,28 +387,50 @@ export default function BuilderHomeScreen() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Import units</Text>
+            <Text style={styles.sectionTitle}>Import buyers</Text>
             <Text style={styles.helper}>
-              CSV header: towerId,unitId,label. Existing unit IDs must match exactly.
+              Choose a CSV with Tower, Unit, Name, and Phone columns, or paste one below. Existing
+              tower and unit names are reused; contact details are stored separately from buyer
+              feeds.
             </Text>
+            <PrimaryButton
+              label="Choose CSV file"
+              loading={busy === 'csv-pick'}
+              onPress={() => void handlePickCsv()}
+            />
+            {csvFileName ? <Text style={styles.rowDetail}>Selected: {csvFileName}</Text> : null}
             <FormField
-              label="Unit CSV"
+              label="Pasted CSV (optional)"
               multiline
               numberOfLines={6}
-              onChangeText={setCsv}
-              placeholder={'towerId,unitId,label\ntower-1,unit-101,Unit 101'}
+              onChangeText={(value) => applyCsv(value)}
+              placeholder={'Tower,Unit,Name,Phone\nTower 1,Unit 101,Asha,+15551234567'}
               value={csv}
             />
+            {clientCsvErrors.length > 0 ? (
+              <View style={styles.preview}>
+                <Text style={styles.previewSummary}>Fix these client-side issues:</Text>
+                {clientCsvErrors.map((errorMessage) => (
+                  <Text key={errorMessage} style={styles.previewError}>
+                    {errorMessage}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
             <View style={styles.buttonRow}>
               <PrimaryButton
-                disabled={!csv.trim()}
+                disabled={!csv.trim() || clientCsvErrors.length > 0}
                 label="Preview CSV"
                 loading={busy === 'import-preview'}
                 onPress={() => void handleImport(true)}
               />
               <PrimaryButton
-                disabled={!csv.trim()}
-                label="Import units"
+                disabled={
+                  !csv.trim() ||
+                  clientCsvErrors.length > 0 ||
+                  (importPreview !== null && !importPreview.complete)
+                }
+                label="Import buyers"
                 loading={busy === 'import'}
                 onPress={() => void handleImport(false)}
               />
@@ -323,15 +438,15 @@ export default function BuilderHomeScreen() {
             {importPreview ? (
               <View style={styles.preview}>
                 <Text style={styles.previewSummary}>
-                  {importPreview.created} to create · {importPreview.unchanged} unchanged ·{' '}
-                  {importPreview.failed} invalid
+                  {importPreview.created} buyer contact(s) to create · {importPreview.unchanged}{' '}
+                  unchanged · {importPreview.failed} invalid
                 </Text>
                 {importPreview.rows.map((row) => (
                   <Text
-                    key={`${row.row}-${row.unitId}`}
+                    key={`${row.row}-${row.phone}`}
                     style={[styles.previewRow, row.status === 'error' ? styles.previewError : null]}
                   >
-                    Row {row.row}: {row.towerId}/{row.unitId} {row.label} — {row.status}
+                    Row {row.row}: {row.tower}/{row.unit} {row.name} ({row.phone}) — {row.status}
                     {row.message ? ` (${row.message})` : ''}
                   </Text>
                 ))}
@@ -342,13 +457,19 @@ export default function BuilderHomeScreen() {
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Invites and buyer status</Text>
             <Text style={styles.helper}>
-              Generate a single-use code for a unit. Status updates after the buyer redeems it.
+              Generate a single-use code for a unit. Repeated calls reuse the active invite; its
+              code cannot be recovered after a lost response. Replacing an invite revokes the
+              previous code immediately.
             </Text>
             {snapshot.units.length === 0 ? (
-              <EmptyState message="Import units before generating invites." title="No units yet" />
+              <EmptyState message="Import buyers to create units before generating invites." title="No units yet" />
             ) : (
               snapshot.units.map((unit) => {
                 const buyer = buyerByUnit.get(unit.id);
+                const contacts = contactsByUnit.get(unit.id) ?? [];
+                const contactLabel = contacts
+                  .map((contact) => `${contact.name} (${contact.phone})`)
+                  .join('; ');
                 return (
                   <View key={unit.id} style={styles.unitRow}>
                     <View style={styles.unitInfo}>
@@ -357,24 +478,45 @@ export default function BuilderHomeScreen() {
                         {towerNames.get(unit.towerId) ?? unit.towerId} · {unit.id}
                       </Text>
                       <Text style={buyer ? styles.joined : styles.awaiting}>
-                        {buyer ? `Joined as ${buyer.uid}` : 'Awaiting buyer'}
+                        {buyer ? `Joined as ${buyer.uid}` : 'Not joined'}
                       </Text>
+                      {contactLabel ? (
+                        <Text style={styles.rowDetail}>Imported: {contactLabel}</Text>
+                      ) : null}
                     </View>
-                    <Pressable
-                      accessibilityLabel={`Generate invite for ${unit.label}`}
-                      accessibilityRole="button"
-                      disabled={busy !== null}
-                      onPress={() => void handleGenerateInvite(unit.towerId, unit.id)}
-                      style={({ pressed }) => [
-                        styles.inviteButton,
-                        busy !== null ? styles.buttonDisabled : null,
-                        pressed ? styles.pressed : null,
-                      ]}
-                    >
-                      <Text style={styles.inviteButtonLabel}>
-                        {busy === `invite:${unit.id}` ? 'Working…' : 'Invite'}
-                      </Text>
-                    </Pressable>
+                    <View style={styles.inviteActions}>
+                      <Pressable
+                        accessibilityLabel={`Generate invite for ${unit.label}`}
+                        accessibilityRole="button"
+                        disabled={busy !== null}
+                        onPress={() => void handleGenerateInvite(unit.towerId, unit.id)}
+                        style={({ pressed }) => [
+                          styles.inviteButton,
+                          busy !== null ? styles.buttonDisabled : null,
+                          pressed ? styles.pressed : null,
+                        ]}
+                      >
+                        <Text style={styles.inviteButtonLabel}>
+                          {busy === `invite:${unit.id}` ? 'Working…' : 'Invite'}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityLabel={`Replace invite for ${unit.label}`}
+                        accessibilityRole="button"
+                        disabled={busy !== null}
+                        onPress={() => void handleGenerateInvite(unit.towerId, unit.id, true)}
+                        style={({ pressed }) => [
+                          styles.inviteButton,
+                          styles.replaceButton,
+                          busy !== null ? styles.buttonDisabled : null,
+                          pressed ? styles.pressed : null,
+                        ]}
+                      >
+                        <Text style={[styles.inviteButtonLabel, styles.replaceButtonLabel]}>
+                          {busy === `replace-invite:${unit.id}` ? 'Working…' : 'Replace'}
+                        </Text>
+                      </Pressable>
+                    </View>
                   </View>
                 );
               })
@@ -382,9 +524,16 @@ export default function BuilderHomeScreen() {
             {generatedInvite ? (
               <View style={styles.generatedInvite}>
                 <Text style={styles.sectionTitle}>Generated invite</Text>
-                <Text selectable style={styles.code}>
-                  {generatedInvite.code}
-                </Text>
+                {generatedInvite.codeAvailable ? (
+                  <Text selectable style={styles.code}>
+                    {generatedInvite.code}
+                  </Text>
+                ) : (
+                  <Text style={styles.previewError}>
+                    An active invite already exists. The plaintext code was never stored and cannot
+                    be recovered; use Replace to issue a new one.
+                  </Text>
+                )}
                 <Text style={styles.rowDetail}>
                   {unitLabels.get(generatedInvite.unitId) ?? generatedInvite.unitId} · expires{' '}
                   {formatTimestamp(generatedInvite.expiresAt)}
@@ -451,25 +600,18 @@ export default function BuilderHomeScreen() {
                   <Text style={styles.noticeBody}>{notice.body}</Text>
                   <Text style={styles.rowDetail}>{audienceLabel(notice)}</Text>
                   <Text style={styles.rowDetail}>
-                    Delivered {notice.audienceCount} · Read {notice.readCount} · Fan-out{' '}
-                    {notice.fanoutStatus}
+                    Audience {notice.audienceCount} · Read {notice.readCount} · Fan-out{' '}
+                    {notice.fanoutStatus} ({notice.fanoutFailedCount} failed)
+                  </Text>
+                  <Text style={styles.rowDetail}>
+                    Canonical pin {notice.pinned ? 'on' : 'off'} · Pin propagation{' '}
+                    {notice.pinStatus} ({notice.pinFailedCount} failed)
                   </Text>
                   <View style={styles.buttonRow}>
                     <PrimaryButton
                       label={notice.pinned ? 'Unpin' : 'Pin'}
                       loading={busy === `pin:${notice.id}`}
-                      onPress={() =>
-                        void runAction(
-                          `pin:${notice.id}`,
-                          () =>
-                            callSetNoticePinned(getFirebaseServices().functions, {
-                              projectId: constructionProjectId,
-                              noticeId: notice.id,
-                              pinned: !notice.pinned,
-                            }),
-                          notice.pinned ? 'Notice unpinned.' : 'Notice pinned.',
-                        )
-                      }
+                      onPress={() => void handleTogglePin(notice)}
                     />
                     <PrimaryButton
                       label="Read status"
@@ -481,21 +623,31 @@ export default function BuilderHomeScreen() {
                     <View style={styles.statusPanel}>
                       <Text style={styles.sectionTitle}>Read status</Text>
                       <Text style={styles.rowDetail}>
-                        {readStatus.readCount} read · {readStatus.unreadCount} unread ·{' '}
-                        {readStatus.deliveredCount} delivered
-                        {readStatus.truncated ? ' · showing first 200 buyers' : ''}
+                        Total audience {readStatus.audienceCount} · Total read{' '}
+                        {readStatus.readCount}
+                      </Text>
+                      <Text style={styles.rowDetail}>
+                        Sample: {readStatus.sampleRecipientCount} recipient(s) ·{' '}
+                        {readStatus.sampleReadCount} read ·{' '}
+                        {readStatus.sampleDeliveredUnreadCount} delivered-unread ·{' '}
+                        {readStatus.sampleNotDeliveredCount} not delivered
+                      </Text>
+                      <Text style={styles.rowDetail}>
+                        {readStatus.truncated
+                          ? 'Recipient details are truncated; sample counts are not totals.'
+                          : 'Recipient details are complete.'}
                       </Text>
                       {readStatus.recipients.length === 0 ? (
-                        <Text style={styles.rowDetail}>No eligible buyers yet.</Text>
+                        <Text style={styles.rowDetail}>No eligible buyers in this sample.</Text>
                       ) : (
                         readStatus.recipients.map((recipient) => (
                           <Text key={recipient.uid} style={styles.rowDetail}>
                             {unitLabels.get(recipient.unitId ?? '') ?? recipient.unitId ?? recipient.uid}:{' '}
-                            {recipient.delivered
-                              ? recipient.read
-                                ? `Read ${formatTimestamp(recipient.readAt as string)}`
-                                : 'Unread'
-                              : 'Not delivered'}
+                            {recipient.read
+                              ? `Read ${formatTimestamp(recipient.readAt as string)}`
+                              : recipient.delivered
+                                ? 'Delivered, unread'
+                                : 'Not delivered'}
                           </Text>
                         ))
                       )}
@@ -602,7 +754,7 @@ const styles = StyleSheet.create({
     color: colors.danger,
   },
   unitRow: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     borderColor: colors.border,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -632,6 +784,11 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.danger,
   },
+  inviteActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
   inviteButton: {
     alignItems: 'center',
     backgroundColor: colors.accent,
@@ -640,6 +797,14 @@ const styles = StyleSheet.create({
     minHeight: 44,
     minWidth: 72,
     paddingHorizontal: spacing.md,
+  },
+  replaceButton: {
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+    borderWidth: 1,
+  },
+  replaceButtonLabel: {
+    color: colors.text,
   },
   inviteButtonLabel: {
     ...typography.caption,

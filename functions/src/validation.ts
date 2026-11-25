@@ -1,11 +1,14 @@
 import { z } from 'zod';
 import type {
+  BuyerContactDoc,
+  BuyerImportData,
   CreateNoticeData,
   FanoutFailureDoc,
   FeedEntryDoc,
   FirestoreTimestamp,
   GenerateInviteData,
   InviteDoc,
+  InviteSlotDoc,
   MarkNoticeReadData,
   MembershipDoc,
   NoticeDoc,
@@ -15,7 +18,6 @@ import type {
   SetNoticePinnedData,
   TowerDoc,
   UnitDoc,
-  UnitImportData,
 } from './domain/types';
 import { invalidPayload } from './errors';
 
@@ -114,7 +116,7 @@ const markNoticeReadSchema = z
   })
   .strict();
 
-const unitImportSchema = z
+const buyerImportSchema = z
   .object({
     projectId: slugSchema,
     csv: z.string().trim().min(1).max(200000),
@@ -128,6 +130,7 @@ const generateInviteSchema = z
     towerId: idSchema,
     unitId: idSchema,
     expiresInHours: z.number().int().min(1).max(720).default(168),
+    regenerate: z.boolean().default(false),
   })
   .strict();
 
@@ -178,6 +181,20 @@ const unitDocSchema = z
   })
   .strict();
 
+const buyerContactDocSchema = z
+  .object({
+    id: z.string().regex(/^[a-f0-9]{64}$/),
+    projectId: slugSchema,
+    towerId: idSchema,
+    unitId: idSchema,
+    name: z.string().min(1).max(120),
+    phone: z.string().regex(/^\+?[0-9]{7,15}$/),
+    importedByUid: z.string().min(1).max(128),
+    importedAt: timestampSchema,
+    updatedAt: timestampSchema,
+  })
+  .strict();
+
 const inviteDocSchema = z
   .object({
     id: z.string().regex(/^[a-f0-9]{64}$/),
@@ -190,6 +207,23 @@ const inviteDocSchema = z
     expiresAt: timestampSchema,
     usedByUid: z.string().min(1).max(128).nullable(),
     usedAt: nullableTimestampSchema,
+    revokedAt: nullableTimestampSchema.default(null),
+  })
+  .strict();
+
+const inviteSlotDocSchema = z
+  .object({
+    id: idSchema,
+    projectId: slugSchema,
+    towerId: idSchema,
+    unitId: idSchema,
+    codeHash: z.string().regex(/^[a-f0-9]{64}$/),
+    createdByUid: z.string().min(1).max(128),
+    createdAt: timestampSchema,
+    expiresAt: timestampSchema,
+    usedByUid: z.string().min(1).max(128).nullable(),
+    usedAt: nullableTimestampSchema,
+    revokedAt: nullableTimestampSchema.default(null),
   })
   .strict();
 
@@ -284,8 +318,8 @@ export function parseMarkNoticeRead(value: unknown): MarkNoticeReadData {
   return result.data;
 }
 
-export function parseUnitImport(value: unknown): UnitImportData {
-  const result = unitImportSchema.safeParse(value);
+export function parseBuyerImport(value: unknown): BuyerImportData {
+  const result = buyerImportSchema.safeParse(value);
   if (!result.success) {
     throw invalidPayload();
   }
@@ -328,8 +362,16 @@ export function parseUnit(value: unknown): UnitDoc {
   return unitDocSchema.parse(value);
 }
 
+export function parseBuyerContact(value: unknown): BuyerContactDoc {
+  return buyerContactDocSchema.parse(value);
+}
+
 export function parseInvite(value: unknown): InviteDoc {
   return inviteDocSchema.parse(value);
+}
+
+export function parseInviteSlot(value: unknown): InviteSlotDoc {
+  return inviteSlotDocSchema.parse(value);
 }
 
 export function parseNotice(value: unknown): NoticeDoc {

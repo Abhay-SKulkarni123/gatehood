@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
-import type { DocumentReference, DocumentSnapshot } from 'firebase-admin/firestore';
+import { FieldPath } from 'firebase-admin/firestore';
+import type { DocumentReference, DocumentSnapshot, Query } from 'firebase-admin/firestore';
 import type {
   CreateNoticeData,
   CreateNoticeResult,
@@ -13,7 +14,12 @@ import type {
   SetNoticePinnedData,
   SetNoticePinnedResult,
 } from '../domain/types';
-import { READ_STATUS_LIMIT, TRANSIENT_ATTEMPTS } from '../config';
+import {
+  READ_STATUS_LIMIT,
+  READ_STATUS_MAX_PAGES,
+  READ_STATUS_PAGE_SIZE,
+  TRANSIENT_ATTEMPTS,
+} from '../config';
 import { delay, invalidPayload, isTransientError, noticeNotFound } from '../errors';
 import {
   eligibleBuyerUids,
@@ -255,22 +261,51 @@ export async function getNoticeReadStatus(
   data: NoticeReadStatusData,
 ): Promise<NoticeReadStatusResult> {
   const notice = await getNotice(data.projectId, data.noticeId);
-  const membersSnapshot = await db
-    .collection(paths.members(data.projectId))
-    .where('role', '==', 'buyer')
-    .limit(READ_STATUS_LIMIT)
-    .get();
+  const eligible: ReturnType<typeof parseMembership>[] = [];
+  let lastSnapshot: DocumentSnapshot | null = null;
+  let truncated = false;
 
-  const eligible = membersSnapshot.docs.flatMap((document) => {
-    try {
-      const membership = parseMembership(toRecord(document.data()));
-      return membership.projectId === data.projectId && isRecipientEligible(membership, notice)
-        ? [membership]
-        : [];
-    } catch {
-      return [];
+  for (let page = 0; page < READ_STATUS_MAX_PAGES; page += 1) {
+    let membersQuery: Query = db
+      .collection(paths.members(data.projectId))
+      .orderBy(FieldPath.documentId())
+      .limit(READ_STATUS_PAGE_SIZE);
+    if (lastSnapshot) {
+      membersQuery = membersQuery.startAfter(lastSnapshot);
     }
-  });
+
+    const membersSnapshot = await membersQuery.get();
+    if (membersSnapshot.empty) {
+      break;
+    }
+
+    for (const document of membersSnapshot.docs) {
+      try {
+        const membership = parseMembership(toRecord(document.data()));
+        if (!isRecipientEligible(membership, notice)) {
+          continue;
+        }
+        if (eligible.length >= READ_STATUS_LIMIT) {
+          truncated = true;
+          break;
+        }
+        eligible.push(membership);
+      } catch {
+        continue;
+      }
+    }
+    if (truncated) {
+      break;
+    }
+
+    lastSnapshot = membersSnapshot.docs[membersSnapshot.docs.length - 1];
+    if (membersSnapshot.size < READ_STATUS_PAGE_SIZE) {
+      break;
+    }
+    if (page === READ_STATUS_MAX_PAGES - 1) {
+      truncated = true;
+    }
+  }
 
   const feedRefs = eligible.map((membership) => db.doc(paths.feed(membership.uid, notice.id)));
   const feedSnapshots = new Map<string, DocumentSnapshot>();
@@ -316,10 +351,13 @@ export async function getNoticeReadStatus(
     noticeId: notice.id,
     audienceCount: notice.audienceCount,
     readCount: notice.readCount,
-    deliveredCount: recipients.filter((recipient) => recipient.delivered).length,
-    unreadCount: recipients.filter((recipient) => !recipient.read).length,
-    recipientCount: recipients.length,
-    truncated: membersSnapshot.docs.length === READ_STATUS_LIMIT,
+    sampleRecipientCount: recipients.length,
+    sampleReadCount: recipients.filter((recipient) => recipient.read).length,
+    sampleDeliveredUnreadCount: recipients.filter(
+      (recipient) => recipient.delivered && !recipient.read,
+    ).length,
+    sampleNotDeliveredCount: recipients.filter((recipient) => !recipient.delivered).length,
+    truncated,
     recipients,
   };
 }

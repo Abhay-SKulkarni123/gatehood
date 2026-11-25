@@ -1,5 +1,9 @@
 export type {
   AudienceType,
+  BuyerContactDoc,
+  BuyerImportData,
+  BuyerImportResult,
+  BuyerImportRow,
   CreateNoticeData,
   CreateNoticeResult,
   FailureKind,
@@ -11,6 +15,7 @@ export type {
   GenerateInviteData,
   GenerateInviteResult,
   InviteDoc,
+  InviteSlotDoc,
   MarkNoticeReadData,
   MarkNoticeReadResult,
   MembershipDoc,
@@ -29,8 +34,5 @@ export type {
   SetNoticePinnedResult,
   TowerDoc,
   UnitDoc,
-  UnitImportData,
-  UnitImportResult,
-  UnitImportRow,
   UserDoc,
 } from '../../functions/src/domain/types';

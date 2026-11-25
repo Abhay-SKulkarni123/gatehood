@@ -18,9 +18,11 @@ All writes to these paths are privileged Admin SDK writes from Cloud Functions. 
 | `users/{uid}` | Public user record | `uid`, `displayName`, `phone`, `createdAt`, `updatedAt` |
 | `projects/{projectId}` | Construction project | `id`, `name`, `createdByUid`, `createdAt` |
 | `projects/{projectId}/members/{uid}` | Role and membership | Doc ID is Auth UID; `role: builder|buyer`, `towerId?`, `unitId?` |
-| `projects/{projectId}/towers/{towerId}` | Tower reference | `id`, `name` |
-| `projects/{projectId}/units/{unitId}` | Unit reference | `id`, `towerId`, `label` |
-| `invites/{codeHash}` | Single-use invite | Doc ID is SHA-256 of normalized code; `codeHash`, `projectId`, `towerId`, `unitId`, `expiresAt`, `usedAt`, `usedByUid` |
+| `projects/{projectId}/towers/{towerId}` | Tower reference | `id`, `name`; imported IDs are deterministic from normalized name |
+| `projects/{projectId}/units/{unitId}` | Unit reference | `id`, `towerId`, `label`; imported IDs are deterministic from tower and normalized label |
+| `projects/{projectId}/buyerContacts/{contactId}` | Builder-only imported contact detail | Doc ID is deterministic from normalized phone; `towerId`, `unitId`, `name`, `phone`, `importedByUid`, `importedAt`, `updatedAt` |
+| `projects/{projectId}/inviteSlots/{unitId}` | Per-unit invite idempotency slot | Doc ID is unit ID; stores current `codeHash`, `expiresAt`, `usedAt`, `revokedAt`; never readable or writable by clients |
+| `invites/{codeHash}` | Single-use invite | Doc ID is SHA-256 of normalized code; `codeHash`, `projectId`, `towerId`, `unitId`, `expiresAt`, `usedAt`, `usedByUid`, `revokedAt` |
 | `projects/{projectId}/notices/{noticeId}` | Canonical notice and counters | `audienceType`, `audienceTowerIds`, `audienceUnitIds`, `pinned`, `audienceCount`, `readCount`, `fanoutStatus`, `pinStatus`, `fanoutFailedCount`, `pinFailedCount` |
 | `users/{uid}/feed/{noticeId}` | Recipient-specific denormalized notice | Doc ID is canonical notice ID; required fields listed below |
 | `projects/{projectId}/fanoutFailures/{kind_noticeId_uid}` | Recoverable propagation failure | Stable ID includes operation kind; `kind`, `resolved`, `retryable`, `attempts`, `lastAttemptAt`, `reason`, `updatedAt` |
@@ -53,9 +55,12 @@ All callables are Firebase Functions v2 `onCall` handlers in the configured regi
 | Function | Responsibility |
 |---|---|
 | `redeemInvite` | Validate/normalize code, hash it, transactionally consume it and create buyer membership, then idempotently backfill eligible notices |
+| `importBuyers` | Authorize builder, validate `Tower,Unit,Name,Phone` CSV, and preview/commit bounded all-or-nothing tower, unit, and contact writes |
+| `generateInvite` | Authorize builder, reuse an active invite per unit, or explicitly regenerate and revoke the previous code |
 | `createNotice` | Authorize builder, validate audience, persist canonical notice, then idempotently fan out to eligible buyers |
 | `setNoticePinned` | Authorize builder, update canonical notice pinned state, then idempotently propagate to feed entries |
 | `markNoticeRead` | Authorize buyer, verify own feed entry, set first `readAt`, and increment canonical `readCount` once |
+| `getNoticeReadStatus` | Authorize builder and return canonical totals plus paginated, audience-filtered recipient samples |
 
 Internal fan-out and retry helpers are not callable endpoints.
 
@@ -72,7 +77,15 @@ Internal fan-out and retry helpers are not callable endpoints.
    - mark the invite used.
 5. Backfill eligible existing notices through the same recipient-level fan-out helper used for new notices.
 
-Invalid, expired, and already-used codes return the same safe `invalid-argument` message to prevent enumeration.
+Invalid, expired, revoked, and already-used codes return the same safe `invalid-argument` message to prevent enumeration.
+
+## Buyer CSV import
+
+`importBuyers` accepts `Tower,Unit,Name,Phone` CSV with common header aliases. The client validates headers, row shape, phone syntax, duplicate tower/unit pairs, and duplicate phones before callable preview/commit. The backend repeats validation, caps rows/writes at the Firestore batch limit, reuses tower/unit documents by normalized name/label, and rejects conflicting existing names. Contact documents use deterministic IDs derived from normalized phone, so an identical re-import reports `unchanged` without rewriting data. Preview never writes; commit is all-or-nothing. Only builders can read `buyerContacts`, and no contact detail is copied into buyer feed documents.
+
+## Invite generation
+
+`generateInvite` uses a transactional slot per unit. Without `regenerate`, repeated calls return the existing active invite with `code: null` and `codeAvailable: false`; plaintext is deliberately not recoverable because only a hash is stored. With `regenerate: true`, the previous active invite is marked `revokedAt` in the same transaction that creates the new invite and slot, so the old code fails redemption immediately. Random-code collisions are retried with a fixed attempt bound.
 
 ## Notice fan-out and retries
 
@@ -126,9 +139,13 @@ The single-document `readCount` counter on `projects/{projectId}/notices/{notice
 
 Limitation: all successful first reads for one notice serialize on the same canonical notice document. At much larger scale this becomes a Firestore write-contention hotspot; sharded counters or aggregation would be the next step. They are not introduced here.
 
+## Builder read status
+
+`getNoticeReadStatus` returns `audienceCount` and `readCount` from the canonical notice as the authoritative totals. Recipient detail is a sample: membership documents are read by document ID in pages of 200, filtered by notice audience before feed documents are fetched, and capped at 200 recipients with a 10-page maximum. When the sample is incomplete, `truncated: true` and sample counters are explicitly separate from canonical totals. This prevents a targeted audience beyond the first membership page from being misreported as unread or empty.
+
 ## Security rules
 
-Rules default-deny, require authentication, and derive authorization from membership documents in the path's project. Buyers can read only their own user/feed documents. Builders can read only their authorized project's supporting data. All notice, invite, membership, role, counter, failure, and client feed writes from clients are denied; top-level `invites/{codeHash}` is never readable or writable by clients. Admin SDK operations bypass rules and are authorized inside Functions.
+Rules default-deny, require authentication, and derive authorization from membership documents in the path's project. Buyers can read only their own user/feed documents. Builders can read only their authorized project's supporting data, including `buyerContacts`; buyers cannot read those contact documents. `projects/{projectId}/inviteSlots/{unitId}` and top-level `invites/{codeHash}` are never readable or writable by clients. All notice, invite, membership, role, counter, failure, contact, and client feed writes from clients are denied. Admin SDK operations bypass rules and are authorized inside Functions.
 
 ## Emulator testing
 
@@ -145,7 +162,7 @@ Exact individual scripts are defined in root `package.json`.
 
 ## Deferred work
 
-The following were deferred by Phase 2. CSV import, invite generation, builder read-status retrieval, and client feature screens/callable wrappers were later added in Phase 4.
+The following were deferred by Phase 2. Buyer CSV import, invite generation, builder read-status retrieval, and client feature screens/callable wrappers were later added in Phase 4.
 
 - Reconciliation jobs for terminal failures and counter drift.
-- Pagination beyond simple collection reads for very large projects.
+- Fully paginated UI for very large recipient lists; the current read-status endpoint returns a bounded sample.
