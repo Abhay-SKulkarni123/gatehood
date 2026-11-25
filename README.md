@@ -1,8 +1,8 @@
 # Gatehood
 
-Gatehood is a React Native construction communication app. Phase 2 adds the backend foundation on top of the Phase 1 Expo/Firebase setup: Firestore schema and rules, strict domain models, callable Cloud Functions for invite redemption, notices, fan-out, pinning, and read tracking, plus emulator and security-rule tests.
+Gatehood is a React Native construction communication app. Phase 1 established the Expo/Firebase foundation with validated environment configuration, App Check wiring, emulator support, and strict TypeScript. Phase 2 added the backend foundation: Firestore schema and rules, strict domain models, callable Cloud Functions for invite redemption, notices, fan-out, pinning, and read tracking, plus emulator and security-rule tests. Phase 3 added Firebase Authentication, session-scoped membership resolution, protected Expo Router navigation, and minimal auth, onboarding, and access-confirmation screens.
 
-No feature screens are implemented yet. There are no authentication screens, invite screens, CSV import UI, notice composer, feeds, or builder/buyer dashboards. See `docs/PHASE2_ARCHITECTURE.md` for the schema, flows, and guarantees.
+Feature workflows are intentionally limited. The repository has no invite redemption UI, CSV import UI, notice composer or notice management screens, buyer feed or My Unit screens, offline feed support, or full builder/buyer dashboards. See `docs/PHASE2_ARCHITECTURE.md` for the backend schema, flows, and guarantees.
 
 ## Tech stack
 
@@ -167,6 +167,7 @@ app.config.js
 firebase.json
 firestore.rules
 firestore.indexes.json
+jest.config.js
 docs/
   PHASE2_ARCHITECTURE.md
 functions/
@@ -179,9 +180,25 @@ src/
   app/
     _layout.tsx
     index.tsx
+    (auth)/
+      sign-in.tsx
+      register.tsx
+    (onboarding)/
+      pending-membership.tsx
+      access-denied.tsx
+      membership-unavailable.tsx
+    (protected)/
+      builder/index.tsx
+      buyer/index.tsx
   components/
   config/
-  lib/firebase/
+  hooks/
+  lib/
+    auth/
+    firebase/
+    membership/
+  navigation/
+  providers/
   theme/
   types/
   utils/
@@ -192,8 +209,8 @@ __tests__/
 
 Implemented:
 
-- Expo SDK 58 foundation
-- Expo Router root layout and landing screen
+- Expo SDK 58 foundation and development-build Firebase setup
+- Expo Router root layout with session-scoped route guarding
 - Strict TypeScript configuration for app and Functions
 - Validated client environment configuration
 - Firebase singleton initialization for app, auth, firestore, functions, and app-check
@@ -206,13 +223,21 @@ Implemented:
 - Idempotent pin propagation using the latest canonical state
 - Transactional first-read counting
 - Backend and security-rule emulator tests
-- Foundational reusable UI components and lint/test configuration
+- Email/password sign-in
+- Buyer email/password registration
+- Firebase Auth state subscription and provider
+- Membership-based role resolution from `projects/{projectId}/members/{uid}`
+- Protected Expo Router navigation for builder and buyer roles
+- Pending-membership, access-denied, and membership-unavailable screens
+- Minimal builder and buyer access-confirmation placeholders
+- Foundational reusable UI components, auth/membership/route tests, and lint/test configuration
 
 Not implemented:
 
-- Authentication and invite screens
+- Invite redemption UI
 - CSV import UI
-- Notice composer and feed UI
-- Offline queues
-- Builder or buyer dashboards
+- Notice composer and notice management screens
+- Buyer feed and My Unit screens
+- Offline feed support and read queue UI
+- Full builder and buyer dashboards
 - Firebase Hosting/deployment configuration beyond local emulators
