@@ -2,6 +2,7 @@ import {
   canCommitBuyerImport,
   createBuyerCsvState,
   validateBuyerCsv,
+  type BuyerImportPreview,
 } from '@/lib/csv/buyer-import';
 import { isBuyerContactDoc, isFeedEntryDoc, isNoticeDoc, isUnitDoc } from '@/lib/data/parse';
 import { sortBuyerFeed } from '@/lib/data/sort';
@@ -21,6 +22,13 @@ function successfulPreview(overrides: Partial<BuyerImportResult> = {}): BuyerImp
     complete: true,
     ...overrides,
   };
+}
+
+function previewFor(
+  csv: string,
+  overrides: Partial<BuyerImportResult> = {},
+): BuyerImportPreview {
+  return { csv, result: successfulPreview(overrides) };
 }
 
 function timestampAt(millis: number) {
@@ -191,7 +199,7 @@ describe('Phase 4 client helpers', () => {
     expect(
       canCommitBuyerImport({
         ...state,
-        importPreview: successfulPreview(),
+        importPreview: previewFor(buyerCsv),
         previewPending: false,
         importPending: false,
       }),
@@ -203,7 +211,7 @@ describe('Phase 4 client helpers', () => {
     expect(
       canCommitBuyerImport({
         ...state,
-        importPreview: successfulPreview({ complete: false, failed: 1 }),
+        importPreview: previewFor(buyerCsv, { complete: false, failed: 1 }),
         previewPending: false,
         importPending: false,
       }),
@@ -211,20 +219,19 @@ describe('Phase 4 client helpers', () => {
     expect(
       canCommitBuyerImport({
         ...state,
-        importPreview: successfulPreview({ dryRun: false }),
+        importPreview: previewFor(buyerCsv, { dryRun: false }),
         previewPending: false,
         importPending: false,
       }),
     ).toBe(false);
 
-    const invalidState = createBuyerCsvState(
-      'Tower,Unit,Name,Phone\nTower 1,Unit 101,Asha,123\n',
-    );
+    const invalidCsv = 'Tower,Unit,Name,Phone\nTower 1,Unit 101,Asha,123\n';
+    const invalidState = createBuyerCsvState(invalidCsv);
     expect(invalidState.clientCsvErrors.length).toBeGreaterThan(0);
     expect(
       canCommitBuyerImport({
         ...invalidState,
-        importPreview: successfulPreview(),
+        importPreview: previewFor(invalidCsv),
         previewPending: false,
         importPending: false,
       }),
@@ -236,15 +243,14 @@ describe('Phase 4 client helpers', () => {
     expect(
       canCommitBuyerImport({
         ...previewedState,
-        importPreview: successfulPreview(),
+        importPreview: previewFor(buyerCsv),
         previewPending: false,
         importPending: false,
       }),
     ).toBe(true);
 
-    const editedState = createBuyerCsvState(
-      'Tower,Unit,Name,Phone\nTower 1,Unit 102,Meera,+15550105\n',
-    );
+    const editedCsv = 'Tower,Unit,Name,Phone\nTower 1,Unit 102,Meera,+15550105\n';
+    const editedState = createBuyerCsvState(editedCsv);
     expect(editedState.importPreview).toBeNull();
     expect(
       canCommitBuyerImport({
@@ -253,11 +259,19 @@ describe('Phase 4 client helpers', () => {
         importPending: false,
       }),
     ).toBe(false);
+    expect(
+      canCommitBuyerImport({
+        ...editedState,
+        importPreview: previewFor(buyerCsv),
+        previewPending: false,
+        importPending: false,
+      }),
+    ).toBe(false);
   });
 
   it('keeps import disabled while preview or import requests are running', () => {
     const state = createBuyerCsvState(buyerCsv);
-    const importPreview = successfulPreview();
+    const importPreview = previewFor(buyerCsv);
 
     expect(
       canCommitBuyerImport({
@@ -273,6 +287,31 @@ describe('Phase 4 client helpers', () => {
         importPreview,
         previewPending: false,
         importPending: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects a late successful response for CSV A after editing to CSV B', () => {
+    const csvA = buyerCsv;
+    const pendingStateA = createBuyerCsvState(csvA);
+    expect(
+      canCommitBuyerImport({
+        ...pendingStateA,
+        previewPending: true,
+        importPending: false,
+      }),
+    ).toBe(false);
+
+    const csvB = 'Tower,Unit,Name,Phone\nTower 1,Unit 102,Meera,+15550105\n';
+    const editedStateB = createBuyerCsvState(csvB);
+    const lateResponseForA = previewFor(csvA);
+
+    expect(
+      canCommitBuyerImport({
+        ...editedStateB,
+        importPreview: lateResponseForA,
+        previewPending: false,
+        importPending: false,
       }),
     ).toBe(false);
   });

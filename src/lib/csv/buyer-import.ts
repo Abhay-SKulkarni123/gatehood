@@ -218,6 +218,11 @@ export function validateBuyerCsv(csv: string): BuyerCsvValidation {
   return { rows: finalRows, errors, valid: errors.length === 0 };
 }
 
+export type BuyerImportPreview = {
+  csv: string;
+  result: BuyerImportResult;
+};
+
 export type BuyerCsvState = {
   csv: string;
   csvFileName: string | null;
@@ -241,7 +246,7 @@ export function createBuyerCsvState(
 export type BuyerImportCommitGate = {
   csv: string;
   clientCsvErrors: readonly string[];
-  importPreview: BuyerImportResult | null;
+  importPreview: BuyerImportPreview | null;
   previewPending: boolean;
   importPending: boolean;
 };
@@ -264,8 +269,9 @@ export function canCommitBuyerImport({
 
   return (
     importPreview !== null &&
-    importPreview.dryRun &&
-    importPreview.complete &&
-    importPreview.failed === 0
+    importPreview.csv === csv &&
+    importPreview.result.dryRun &&
+    importPreview.result.complete &&
+    importPreview.result.failed === 0
   );
 }

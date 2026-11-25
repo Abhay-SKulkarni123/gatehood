@@ -12,6 +12,7 @@ import { getClientConfig } from '@/config/env';
 import {
   canCommitBuyerImport,
   createBuyerCsvState,
+  type BuyerImportPreview,
 } from '@/lib/csv/buyer-import';
 import type { BuilderSnapshot } from '@/lib/data/builder';
 import { loadBuilderSnapshot } from '@/lib/data/builder';
@@ -27,7 +28,6 @@ import { getFirebaseServices } from '@/lib/firebase';
 import { useAuth } from '@/providers/auth-provider';
 import type {
   BuyerContactDoc,
-  BuyerImportResult,
   FirestoreTimestamp,
   GenerateInviteResult,
   NoticeAudience,
@@ -69,7 +69,7 @@ export default function BuilderHomeScreen() {
   const [csv, setCsv] = useState('');
   const [csvFileName, setCsvFileName] = useState<string | null>(null);
   const [clientCsvErrors, setClientCsvErrors] = useState<string[]>([]);
-  const [importPreview, setImportPreview] = useState<BuyerImportResult | null>(null);
+  const [importPreview, setImportPreview] = useState<BuyerImportPreview | null>(null);
   const [generatedInvite, setGeneratedInvite] = useState<GenerateInviteResult | null>(null);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -207,8 +207,8 @@ export default function BuilderHomeScreen() {
         csv,
         dryRun,
       });
-      setImportPreview(result);
       if (dryRun) {
+        setImportPreview({ csv, result });
         setMessage('Preview ready. Review each row before importing.');
       } else {
         applyCsv('');
@@ -346,6 +346,7 @@ export default function BuilderHomeScreen() {
     previewPending: busy === 'import-preview',
     importPending: busy === 'import',
   });
+  const visibleImportPreview = importPreview?.csv === csv ? importPreview.result : null;
 
   return (
     <Screen>
@@ -445,13 +446,13 @@ export default function BuilderHomeScreen() {
                 onPress={() => void handleImport(false)}
               />
             </View>
-            {importPreview ? (
+            {visibleImportPreview ? (
               <View style={styles.preview}>
                 <Text style={styles.previewSummary}>
-                  {importPreview.created} buyer contact(s) to create · {importPreview.unchanged}{' '}
-                  unchanged · {importPreview.failed} invalid
+                  {visibleImportPreview.created} buyer contact(s) to create ·{' '}
+                  {visibleImportPreview.unchanged} unchanged · {visibleImportPreview.failed} invalid
                 </Text>
-                {importPreview.rows.map((row) => (
+                {visibleImportPreview.rows.map((row) => (
                   <Text
                     key={`${row.row}-${row.phone}`}
                     style={[styles.previewRow, row.status === 'error' ? styles.previewError : null]}
