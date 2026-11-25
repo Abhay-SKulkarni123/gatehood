@@ -1,20 +1,257 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ChoiceChip } from '@/components/choice-chip';
+import { EmptyState } from '@/components/empty-state';
+import { ErrorState } from '@/components/error-state';
+import { FormField } from '@/components/form-field';
+import { LoadingIndicator } from '@/components/loading-indicator';
 import { PrimaryButton } from '@/components/primary-button';
 import { Screen } from '@/components/screen';
+import { getClientConfig } from '@/config/env';
+import type { BuilderSnapshot } from '@/lib/data/builder';
+import { loadBuilderSnapshot } from '@/lib/data/builder';
+import {
+  describeCallableError,
+  callCreateNotice,
+  callGenerateInvite,
+  callGetNoticeReadStatus,
+  callImportUnits,
+  callSetNoticePinned,
+} from '@/lib/functions';
+import { getFirebaseServices } from '@/lib/firebase';
 import { useAuth } from '@/providers/auth-provider';
-import { colors, spacing, typography } from '@/theme';
+import type {
+  FirestoreTimestamp,
+  GenerateInviteResult,
+  NoticeAudience,
+  NoticeDoc,
+  NoticeReadStatusResult,
+  UnitImportResult,
+} from '@/types/domain';
+import { colors, radius, spacing, typography } from '@/theme';
+import { parseIdList } from '@/utils/identifiers';
+
+type NoticeAudienceType = NoticeAudience['type'];
+
+function formatTimestamp(value: FirestoreTimestamp | string): string {
+  if (typeof value === 'string') {
+    return new Date(value).toLocaleString();
+  }
+  return value.toDate().toLocaleString();
+}
+
+function audienceLabel(notice: NoticeDoc): string {
+  if (notice.audienceType === 'project') {
+    return 'All buyers';
+  }
+  if (notice.audienceType === 'tower') {
+    return `Towers: ${notice.audienceTowerIds.join(', ')}`;
+  }
+  return `Units: ${notice.audienceUnitIds.join(', ')}`;
+}
 
 export default function BuilderHomeScreen() {
   const { user, logout, actionPending } = useAuth();
+  const { constructionProjectId } = getClientConfig();
+
+  const [snapshot, setSnapshot] = useState<BuilderSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [csv, setCsv] = useState('');
+  const [importPreview, setImportPreview] = useState<UnitImportResult | null>(null);
+  const [generatedInvite, setGeneratedInvite] = useState<GenerateInviteResult | null>(null);
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [audienceType, setAudienceType] = useState<NoticeAudienceType>('project');
+  const [audienceIds, setAudienceIds] = useState('');
+  const [readStatus, setReadStatus] = useState<NoticeReadStatusResult | null>(null);
+
+  const load = async (showLoading: boolean) => {
+    if (showLoading) {
+      setLoading(true);
+    }
+    setLoadError(null);
+    try {
+      const { firestore } = getFirebaseServices();
+      setSnapshot(await loadBuilderSnapshot(firestore, constructionProjectId));
+    } catch (loadFailure) {
+      setLoadError(describeCallableError(loadFailure));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      try {
+        const { firestore } = getFirebaseServices();
+        const data = await loadBuilderSnapshot(firestore, constructionProjectId);
+        if (active) {
+          setSnapshot(data);
+        }
+      } catch (loadFailure) {
+        if (active) {
+          setLoadError(describeCallableError(loadFailure));
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    };
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [constructionProjectId]);
+
+  const refresh = () => load(false);
+
+  const runAction = async <T,>(
+    key: string,
+    action: () => Promise<T>,
+    successMessage?: string,
+  ): Promise<T | null> => {
+    setBusy(key);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await action();
+      if (successMessage) {
+        setMessage(successMessage);
+      }
+      await refresh();
+      return result;
+    } catch (actionError) {
+      setError(describeCallableError(actionError));
+      return null;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const towerNames = useMemo(
+    () => new Map((snapshot?.towers ?? []).map((tower) => [tower.id, tower.name])),
+    [snapshot],
+  );
+  const unitLabels = useMemo(
+    () => new Map((snapshot?.units ?? []).map((unit) => [unit.id, unit.label])),
+    [snapshot],
+  );
+  const buyerByUnit = useMemo(
+    () =>
+      new Map(
+        (snapshot?.buyers ?? [])
+          .filter((buyer) => buyer.unitId !== null)
+          .map((buyer) => [buyer.unitId as string, buyer]),
+      ),
+    [snapshot],
+  );
+
+  const handleImport = async (dryRun: boolean) => {
+    setBusy(dryRun ? 'import-preview' : 'import');
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await callImportUnits(getFirebaseServices().functions, {
+        projectId: constructionProjectId,
+        csv,
+        dryRun,
+      });
+      setImportPreview(result);
+      if (dryRun) {
+        setMessage('Preview ready. Review each row before importing.');
+      } else {
+        setCsv('');
+        setMessage(`${result.created} unit${result.created === 1 ? '' : 's'} imported.`);
+        await refresh();
+      }
+    } catch (importError) {
+      setError(describeCallableError(importError));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleGenerateInvite = async (towerId: string, unitId: string) => {
+    const result = await runAction(
+      `invite:${unitId}`,
+      () =>
+        callGenerateInvite(getFirebaseServices().functions, {
+          projectId: constructionProjectId,
+          towerId,
+          unitId,
+          expiresInHours: 168,
+        }),
+      'Invite generated. Share the code now; it is not stored in plaintext.',
+    );
+    if (result) {
+      setGeneratedInvite(result);
+    }
+  };
+
+  const handleCreateNotice = async () => {
+    const ids = parseIdList(audienceIds);
+    let audience: NoticeAudience = { type: 'project' };
+    if (audienceType === 'tower') {
+      audience = { type: 'tower', towerIds: ids };
+    }
+    if (audienceType === 'unit') {
+      audience = { type: 'unit', unitIds: ids };
+    }
+
+    const result = await runAction(
+      'create-notice',
+      () =>
+        callCreateNotice(getFirebaseServices().functions, {
+          projectId: constructionProjectId,
+          title: title.trim(),
+          body: body.trim(),
+          audience,
+        }),
+      'Notice published.',
+    );
+    if (result) {
+      setTitle('');
+      setBody('');
+      setAudienceIds('');
+    }
+  };
+
+  const handleReadStatus = async (noticeId: string) => {
+    setBusy(`status:${noticeId}`);
+    setError(null);
+    try {
+      setReadStatus(
+        await callGetNoticeReadStatus(getFirebaseServices().functions, {
+          projectId: constructionProjectId,
+          noticeId,
+        }),
+      );
+    } catch (statusError) {
+      setError(describeCallableError(statusError));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const canPublish =
+    title.trim().length > 0 &&
+    body.trim().length > 0 &&
+    (audienceType === 'project' || parseIdList(audienceIds).length > 0);
 
   return (
     <Screen>
-      <View style={styles.content}>
+      <View style={styles.header}>
         <Text style={styles.eyebrow}>BUILDER WORKSPACE</Text>
-        <Text style={styles.title}>Builder access confirmed</Text>
-        <Text style={styles.message}>
-          Signed in as {user?.email ?? user?.uid ?? 'a builder'}. Your role was resolved from project
-          membership.
+        <Text style={styles.title}>{snapshot?.project?.name ?? 'Project workspace'}</Text>
+        <Text style={styles.subtitle}>
+          Signed in as {user?.email ?? user?.uid ?? 'a builder'}. Manage units, invites, and notices
+          for this project.
         </Text>
         <PrimaryButton
           label="Sign out"
@@ -22,13 +259,261 @@ export default function BuilderHomeScreen() {
           onPress={() => void logout()}
         />
       </View>
+
+      {message ? <Text accessibilityRole="status" style={styles.message}>{message}</Text> : null}
+      {error ? <ErrorState message={error} title="Action failed" /> : null}
+
+      {loading ? (
+        <LoadingIndicator label="Loading workspace…" />
+      ) : loadError || !snapshot ? (
+        <ErrorState
+          message={loadError ?? 'Project data could not be loaded.'}
+          onRetry={() => void load(true)}
+          retryLabel="Reload workspace"
+          title="Workspace unavailable"
+        />
+      ) : (
+        <View style={styles.sections}>
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{snapshot.towers.length}</Text>
+              <Text style={styles.statLabel}>Towers</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{snapshot.units.length}</Text>
+              <Text style={styles.statLabel}>Units</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{snapshot.buyers.length}</Text>
+              <Text style={styles.statLabel}>Buyers</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{snapshot.notices.length}</Text>
+              <Text style={styles.statLabel}>Notices</Text>
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Import units</Text>
+            <Text style={styles.helper}>
+              CSV header: towerId,unitId,label. Existing unit IDs must match exactly.
+            </Text>
+            <FormField
+              label="Unit CSV"
+              multiline
+              numberOfLines={6}
+              onChangeText={setCsv}
+              placeholder={'towerId,unitId,label\ntower-1,unit-101,Unit 101'}
+              value={csv}
+            />
+            <View style={styles.buttonRow}>
+              <PrimaryButton
+                disabled={!csv.trim()}
+                label="Preview CSV"
+                loading={busy === 'import-preview'}
+                onPress={() => void handleImport(true)}
+              />
+              <PrimaryButton
+                disabled={!csv.trim()}
+                label="Import units"
+                loading={busy === 'import'}
+                onPress={() => void handleImport(false)}
+              />
+            </View>
+            {importPreview ? (
+              <View style={styles.preview}>
+                <Text style={styles.previewSummary}>
+                  {importPreview.created} to create · {importPreview.unchanged} unchanged ·{' '}
+                  {importPreview.failed} invalid
+                </Text>
+                {importPreview.rows.map((row) => (
+                  <Text
+                    key={`${row.row}-${row.unitId}`}
+                    style={[styles.previewRow, row.status === 'error' ? styles.previewError : null]}
+                  >
+                    Row {row.row}: {row.towerId}/{row.unitId} {row.label} — {row.status}
+                    {row.message ? ` (${row.message})` : ''}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Invites and buyer status</Text>
+            <Text style={styles.helper}>
+              Generate a single-use code for a unit. Status updates after the buyer redeems it.
+            </Text>
+            {snapshot.units.length === 0 ? (
+              <EmptyState message="Import units before generating invites." title="No units yet" />
+            ) : (
+              snapshot.units.map((unit) => {
+                const buyer = buyerByUnit.get(unit.id);
+                return (
+                  <View key={unit.id} style={styles.unitRow}>
+                    <View style={styles.unitInfo}>
+                      <Text style={styles.rowTitle}>{unit.label}</Text>
+                      <Text style={styles.rowDetail}>
+                        {towerNames.get(unit.towerId) ?? unit.towerId} · {unit.id}
+                      </Text>
+                      <Text style={buyer ? styles.joined : styles.awaiting}>
+                        {buyer ? `Joined as ${buyer.uid}` : 'Awaiting buyer'}
+                      </Text>
+                    </View>
+                    <Pressable
+                      accessibilityLabel={`Generate invite for ${unit.label}`}
+                      accessibilityRole="button"
+                      disabled={busy !== null}
+                      onPress={() => void handleGenerateInvite(unit.towerId, unit.id)}
+                      style={({ pressed }) => [
+                        styles.inviteButton,
+                        busy !== null ? styles.buttonDisabled : null,
+                        pressed ? styles.pressed : null,
+                      ]}
+                    >
+                      <Text style={styles.inviteButtonLabel}>
+                        {busy === `invite:${unit.id}` ? 'Working…' : 'Invite'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })
+            )}
+            {generatedInvite ? (
+              <View style={styles.generatedInvite}>
+                <Text style={styles.sectionTitle}>Generated invite</Text>
+                <Text selectable style={styles.code}>
+                  {generatedInvite.code}
+                </Text>
+                <Text style={styles.rowDetail}>
+                  {unitLabels.get(generatedInvite.unitId) ?? generatedInvite.unitId} · expires{' '}
+                  {formatTimestamp(generatedInvite.expiresAt)}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Publish notice</Text>
+            <FormField label="Title" onChangeText={setTitle} placeholder="Water supply update" value={title} />
+            <FormField
+              label="Message"
+              multiline
+              numberOfLines={4}
+              onChangeText={setBody}
+              placeholder="What should buyers know?"
+              value={body}
+            />
+            <View style={styles.chipRow}>
+              <ChoiceChip
+                label="All buyers"
+                onPress={() => setAudienceType('project')}
+                selected={audienceType === 'project'}
+              />
+              <ChoiceChip
+                label="Towers"
+                onPress={() => setAudienceType('tower')}
+                selected={audienceType === 'tower'}
+              />
+              <ChoiceChip
+                label="Units"
+                onPress={() => setAudienceType('unit')}
+                selected={audienceType === 'unit'}
+              />
+            </View>
+            {audienceType === 'project' ? null : (
+              <FormField
+                label={audienceType === 'tower' ? 'Tower IDs' : 'Unit IDs'}
+                onChangeText={setAudienceIds}
+                placeholder="Comma-separated IDs"
+                value={audienceIds}
+              />
+            )}
+            <PrimaryButton
+              disabled={!canPublish}
+              label="Publish notice"
+              loading={busy === 'create-notice'}
+              onPress={() => void handleCreateNotice()}
+            />
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Notices</Text>
+            {snapshot.notices.length === 0 ? (
+              <EmptyState message="Published notices will appear here." title="No notices yet" />
+            ) : (
+              snapshot.notices.map((notice) => (
+                <View key={notice.id} style={styles.notice}>
+                  <View style={styles.noticeHeader}>
+                    <Text style={styles.rowTitle}>{notice.title}</Text>
+                    {notice.pinned ? <Text style={styles.pinned}>Pinned</Text> : null}
+                  </View>
+                  <Text style={styles.noticeBody}>{notice.body}</Text>
+                  <Text style={styles.rowDetail}>{audienceLabel(notice)}</Text>
+                  <Text style={styles.rowDetail}>
+                    Delivered {notice.audienceCount} · Read {notice.readCount} · Fan-out{' '}
+                    {notice.fanoutStatus}
+                  </Text>
+                  <View style={styles.buttonRow}>
+                    <PrimaryButton
+                      label={notice.pinned ? 'Unpin' : 'Pin'}
+                      loading={busy === `pin:${notice.id}`}
+                      onPress={() =>
+                        void runAction(
+                          `pin:${notice.id}`,
+                          () =>
+                            callSetNoticePinned(getFirebaseServices().functions, {
+                              projectId: constructionProjectId,
+                              noticeId: notice.id,
+                              pinned: !notice.pinned,
+                            }),
+                          notice.pinned ? 'Notice unpinned.' : 'Notice pinned.',
+                        )
+                      }
+                    />
+                    <PrimaryButton
+                      label="Read status"
+                      loading={busy === `status:${notice.id}`}
+                      onPress={() => void handleReadStatus(notice.id)}
+                    />
+                  </View>
+                  {readStatus?.noticeId === notice.id ? (
+                    <View style={styles.statusPanel}>
+                      <Text style={styles.sectionTitle}>Read status</Text>
+                      <Text style={styles.rowDetail}>
+                        {readStatus.readCount} read · {readStatus.unreadCount} unread ·{' '}
+                        {readStatus.deliveredCount} delivered
+                        {readStatus.truncated ? ' · showing first 200 buyers' : ''}
+                      </Text>
+                      {readStatus.recipients.length === 0 ? (
+                        <Text style={styles.rowDetail}>No eligible buyers yet.</Text>
+                      ) : (
+                        readStatus.recipients.map((recipient) => (
+                          <Text key={recipient.uid} style={styles.rowDetail}>
+                            {unitLabels.get(recipient.unitId ?? '') ?? recipient.unitId ?? recipient.uid}:{' '}
+                            {recipient.delivered
+                              ? recipient.read
+                                ? `Read ${formatTimestamp(recipient.readAt as string)}`
+                                : 'Unread'
+                              : 'Not delivered'}
+                          </Text>
+                        ))
+                      )}
+                    </View>
+                  ) : null}
+                </View>
+              ))
+            )}
+          </View>
+        </View>
+      )}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    gap: spacing.lg,
+  header: {
+    gap: spacing.md,
     marginTop: spacing.xl,
   },
   eyebrow: {
@@ -40,8 +525,175 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 28,
   },
-  message: {
+  subtitle: {
     ...typography.body,
     color: colors.textMuted,
+  },
+  message: {
+    ...typography.caption,
+    color: colors.accent,
+    marginTop: spacing.md,
+  },
+  sections: {
+    gap: spacing.lg,
+    marginTop: spacing.lg,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  statCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    flexGrow: 1,
+    minWidth: 72,
+    padding: spacing.md,
+  },
+  statValue: {
+    ...typography.heading,
+    color: colors.text,
+    fontSize: 24,
+  },
+  statLabel: {
+    ...typography.caption,
+    color: colors.textMuted,
+  },
+  card: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
+  sectionTitle: {
+    ...typography.heading,
+    color: colors.text,
+  },
+  helper: {
+    ...typography.caption,
+    color: colors.textMuted,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  preview: {
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: spacing.xs,
+    padding: spacing.md,
+  },
+  previewSummary: {
+    ...typography.caption,
+    color: colors.text,
+    fontWeight: '700',
+  },
+  previewRow: {
+    ...typography.caption,
+    color: colors.textMuted,
+  },
+  previewError: {
+    color: colors.danger,
+  },
+  unitRow: {
+    alignItems: 'center',
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.md,
+    justifyContent: 'space-between',
+    padding: spacing.md,
+  },
+  unitInfo: {
+    flexShrink: 1,
+    gap: spacing.xs,
+  },
+  rowTitle: {
+    ...typography.body,
+    color: colors.text,
+    fontWeight: '700',
+  },
+  rowDetail: {
+    ...typography.caption,
+    color: colors.textMuted,
+  },
+  joined: {
+    ...typography.caption,
+    color: colors.accent,
+  },
+  awaiting: {
+    ...typography.caption,
+    color: colors.danger,
+  },
+  inviteButton: {
+    alignItems: 'center',
+    backgroundColor: colors.accent,
+    borderRadius: radius.md,
+    justifyContent: 'center',
+    minHeight: 44,
+    minWidth: 72,
+    paddingHorizontal: spacing.md,
+  },
+  inviteButtonLabel: {
+    ...typography.caption,
+    color: colors.background,
+    fontWeight: '700',
+  },
+  buttonDisabled: {
+    opacity: 0.55,
+  },
+  pressed: {
+    opacity: 0.8,
+  },
+  generatedInvite: {
+    borderColor: colors.accent,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  code: {
+    ...typography.heading,
+    color: colors.accent,
+    letterSpacing: 2,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  notice: {
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  noticeHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  noticeBody: {
+    ...typography.body,
+    color: colors.textMuted,
+  },
+  pinned: {
+    ...typography.caption,
+    color: colors.accent,
+    fontWeight: '700',
+  },
+  statusPanel: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    gap: spacing.xs,
+    padding: spacing.md,
   },
 });

@@ -9,8 +9,8 @@ export function permissionDenied(): HttpsError {
   return new HttpsError('permission-denied', 'You do not have access to this operation.');
 }
 
-export function invalidPayload(): HttpsError {
-  return new HttpsError('invalid-argument', 'The request payload is invalid.');
+export function invalidPayload(message?: string): HttpsError {
+  return new HttpsError('invalid-argument', message ?? 'The request payload is invalid.');
 }
 
 export function invalidInvite(): HttpsError {

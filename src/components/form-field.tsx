@@ -11,6 +11,8 @@ type FormFieldProps = {
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
   autoComplete?: 'email' | 'password' | 'off';
   keyboardType?: KeyboardTypeOptions;
+  multiline?: boolean;
+  numberOfLines?: number;
   error?: string | null;
   onSubmitEditing?: () => void;
 };
@@ -24,6 +26,8 @@ export function FormField({
   autoCapitalize = 'none',
   autoComplete = 'off',
   keyboardType = 'default',
+  multiline = false,
+  numberOfLines,
   error,
   onSubmitEditing,
 }: FormFieldProps) {
@@ -37,12 +41,14 @@ export function FormField({
         autoComplete={autoComplete}
         autoCorrect={false}
         keyboardType={keyboardType}
+        multiline={multiline}
+        numberOfLines={numberOfLines}
         onChangeText={onChangeText}
         onSubmitEditing={onSubmitEditing}
         placeholder={placeholder}
         placeholderTextColor={colors.textMuted}
         secureTextEntry={secureTextEntry}
-        style={[styles.input, error ? styles.inputError : null]}
+        style={[styles.input, multiline ? styles.multilineInput : null, error ? styles.inputError : null]}
         value={value}
       />
       {error ? (
@@ -72,6 +78,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     minHeight: 52,
     paddingHorizontal: spacing.md,
+  },
+  multilineInput: {
+    minHeight: 120,
+    textAlignVertical: 'top',
   },
   inputError: {
     borderColor: colors.danger,

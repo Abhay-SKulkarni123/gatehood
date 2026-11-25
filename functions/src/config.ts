@@ -3,6 +3,8 @@ export const FUNCTIONS_REGION = process.env.FUNCTIONS_REGION || 'us-central1';
 export const FANOUT_CHUNK_SIZE = 25;
 export const FANOUT_CONCURRENCY = 5;
 export const TRANSIENT_ATTEMPTS = 3;
+export const FIRESTORE_BATCH_LIMIT = 200;
+export const READ_STATUS_LIMIT = 200;
 
 export const RETRY_SCHEDULE = 'every 5 minutes';
 export const RETRY_BATCH_LIMIT = 100;

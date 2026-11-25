@@ -1,8 +1,8 @@
 # Gatehood
 
-Gatehood is a React Native construction communication app. Phase 1 established the Expo/Firebase foundation with validated environment configuration, App Check wiring, emulator support, and strict TypeScript. Phase 2 added the backend foundation: Firestore schema and rules, strict domain models, callable Cloud Functions for invite redemption, notices, fan-out, pinning, and read tracking, plus emulator and security-rule tests. Phase 3 added Firebase Authentication, session-scoped membership resolution, protected Expo Router navigation, and minimal auth, onboarding, and access-confirmation screens.
+Gatehood is a React Native construction communication app. Phase 1 established the Expo/Firebase foundation with validated environment configuration, App Check wiring, emulator support, and strict TypeScript. Phase 2 added the backend foundation: Firestore schema and rules, strict domain models, callable Cloud Functions for invite redemption, notices, fan-out, pinning, and read tracking, plus emulator and security-rule tests. Phase 3 added Firebase Authentication, session-scoped membership resolution, protected Expo Router navigation, and minimal auth, onboarding, and access-confirmation screens. Phase 4 added trusted CSV import, invite generation, and notice read-status callables plus functional builder and buyer workflows.
 
-Feature workflows are intentionally limited. The repository has no invite redemption UI, CSV import UI, notice composer or notice management screens, buyer feed or My Unit screens, offline feed support, or full builder/buyer dashboards. See `docs/PHASE2_ARCHITECTURE.md` for the backend schema, flows, and guarantees.
+Feature workflows now cover unit import and preview, invite generation, buyer joining, builder notice publishing and management, notice read status, and buyer notice feeds with first-read actions. Offline feed support, terminal-failure reconciliation, large-project pagination, and deployment configuration remain out of scope. See `docs/PHASE2_ARCHITECTURE.md` for the backend schema, flows, and guarantees.
 
 ## Tech stack
 
@@ -195,7 +195,9 @@ src/
   hooks/
   lib/
     auth/
+    data/
     firebase/
+    functions/
     membership/
   navigation/
   providers/
@@ -229,15 +231,18 @@ Implemented:
 - Membership-based role resolution from `projects/{projectId}/members/{uid}`
 - Protected Expo Router navigation for builder and buyer roles
 - Pending-membership, access-denied, and membership-unavailable screens
-- Minimal builder and buyer access-confirmation placeholders
-- Foundational reusable UI components, auth/membership/route tests, and lint/test configuration
+  - Minimal builder and buyer access-confirmation placeholders
+  - Foundational reusable UI components, auth/membership/route tests, and lint/test configuration
+  - Trusted CSV import preview/commit callables with bounded, all-or-nothing unit writes
+  - Builder-authorized invite generation that returns the code once and stores only its hash
+  - Builder-authorized notice read-status retrieval with bounded recipient detail
+  - Builder workspace with project stats, unit import, invite generation, buyer status, notice composer, pin management, and read-status views
+  - Buyer invite redemption screen and buyer notice feed with mark-as-read actions
+  - Typed callable wrappers and client repositories for Phase 4 workflows
 
 Not implemented:
 
-- Invite redemption UI
-- CSV import UI
-- Notice composer and notice management screens
-- Buyer feed and My Unit screens
 - Offline feed support and read queue UI
-- Full builder and buyer dashboards
+- Reconciliation jobs for terminal failures and counter drift
+- Pagination beyond bounded collection reads for very large projects
 - Firebase Hosting/deployment configuration beyond local emulators

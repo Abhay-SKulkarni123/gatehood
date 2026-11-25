@@ -145,8 +145,7 @@ Exact individual scripts are defined in root `package.json`.
 
 ## Deferred work
 
-- CSV import and invite generation callables.
-- Builder unread-buyer query callables.
+The following were deferred by Phase 2. CSV import, invite generation, builder read-status retrieval, and client feature screens/callable wrappers were later added in Phase 4.
+
 - Reconciliation jobs for terminal failures and counter drift.
 - Pagination beyond simple collection reads for very large projects.
-- Client feature screens and callable wrappers.

@@ -7,15 +7,23 @@ import { retryUnresolvedFailures } from './fanout';
 import { acquireRetryLease, releaseRetryLease } from './retryLock';
 import {
   createNotice as createNoticeService,
+  getNoticeReadStatus as getNoticeReadStatusService,
   markNoticeRead as markNoticeReadService,
   setNoticePinned as setNoticePinnedService,
 } from './services/notices';
-import { redeemInvite as redeemInviteService } from './services/invite';
+import {
+  generateInvite as generateInviteService,
+  redeemInvite as redeemInviteService,
+} from './services/invite';
+import { importUnits as importUnitsService } from './services/units';
 import {
   parseCreateNotice,
+  parseGenerateInvite,
   parseMarkNoticeRead,
+  parseNoticeReadStatus,
   parseRedeemInvite,
   parseSetNoticePinned,
+  parseUnitImport,
 } from './validation';
 
 const callableOptions = {
@@ -61,6 +69,39 @@ export const markNoticeRead = onCall(callableOptions, async (request) => {
     const data = parseMarkNoticeRead(request.data);
     await requireBuyer(data.projectId, uid);
     return await markNoticeReadService(uid, data);
+  } catch (error) {
+    throw asHttpsError(error);
+  }
+});
+
+export const importUnits = onCall(callableOptions, async (request) => {
+  try {
+    const uid = requireUid(request);
+    const data = parseUnitImport(request.data);
+    await requireBuilder(data.projectId, uid);
+    return await importUnitsService(data.projectId, data);
+  } catch (error) {
+    throw asHttpsError(error);
+  }
+});
+
+export const generateInvite = onCall(callableOptions, async (request) => {
+  try {
+    const uid = requireUid(request);
+    const data = parseGenerateInvite(request.data);
+    await requireBuilder(data.projectId, uid);
+    return await generateInviteService(uid, data);
+  } catch (error) {
+    throw asHttpsError(error);
+  }
+});
+
+export const getNoticeReadStatus = onCall(callableOptions, async (request) => {
+  try {
+    const uid = requireUid(request);
+    const data = parseNoticeReadStatus(request.data);
+    await requireBuilder(data.projectId, uid);
+    return await getNoticeReadStatusService(data);
   } catch (error) {
     throw asHttpsError(error);
   }

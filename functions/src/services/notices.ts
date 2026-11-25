@@ -7,21 +7,26 @@ import type {
   MarkNoticeReadResult,
   NoticeAudience,
   NoticeDoc,
+  NoticeReadStatusData,
+  NoticeReadStatusRecipient,
+  NoticeReadStatusResult,
   SetNoticePinnedData,
   SetNoticePinnedResult,
 } from '../domain/types';
-import { TRANSIENT_ATTEMPTS } from '../config';
+import { READ_STATUS_LIMIT, TRANSIENT_ATTEMPTS } from '../config';
 import { delay, invalidPayload, isTransientError, noticeNotFound } from '../errors';
 import {
   eligibleBuyerUids,
   fanOutToRecipients,
   getNotice,
+  isRecipientEligible,
   propagatePinToRecipients,
 } from '../fanout';
 import { db, incrementBy, timestampNow } from '../firestore';
 import { paths } from '../paths';
 import {
   parseFeedEntry,
+  parseMembership,
   parseNotice,
   parseProject,
   parseTower,
@@ -235,5 +240,86 @@ export async function markNoticeRead(
     read: readState.read,
     readAt: readState.readAt === null ? null : readState.readAt.toISOString(),
     readCount: notice.readCount,
+  };
+}
+
+function chunks<T>(items: readonly T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size));
+  }
+  return result;
+}
+
+export async function getNoticeReadStatus(
+  data: NoticeReadStatusData,
+): Promise<NoticeReadStatusResult> {
+  const notice = await getNotice(data.projectId, data.noticeId);
+  const membersSnapshot = await db
+    .collection(paths.members(data.projectId))
+    .where('role', '==', 'buyer')
+    .limit(READ_STATUS_LIMIT)
+    .get();
+
+  const eligible = membersSnapshot.docs.flatMap((document) => {
+    try {
+      const membership = parseMembership(toRecord(document.data()));
+      return membership.projectId === data.projectId && isRecipientEligible(membership, notice)
+        ? [membership]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const feedRefs = eligible.map((membership) => db.doc(paths.feed(membership.uid, notice.id)));
+  const feedSnapshots = new Map<string, DocumentSnapshot>();
+  for (const chunk of chunks(feedRefs, 100)) {
+    const loaded = await db.getAll(...chunk);
+    for (const snapshot of loaded) {
+      feedSnapshots.set(snapshot.ref.path, snapshot);
+    }
+  }
+
+  const recipients: NoticeReadStatusRecipient[] = eligible.map((membership) => {
+    const snapshot = feedSnapshots.get(paths.feed(membership.uid, notice.id));
+    let delivered = false;
+    let read = false;
+    let readAt: string | null = null;
+
+    if (snapshot?.exists) {
+      try {
+        const feed = parseFeedEntry(toRecord(snapshot.data()));
+        if (feed.projectId === data.projectId && feed.noticeId === notice.id) {
+          delivered = true;
+          read = feed.readAt !== null;
+          readAt = feed.readAt === null ? null : feed.readAt.toDate().toISOString();
+        }
+      } catch {
+        delivered = false;
+        read = false;
+        readAt = null;
+      }
+    }
+
+    return {
+      uid: membership.uid,
+      towerId: membership.towerId,
+      unitId: membership.unitId,
+      delivered,
+      read,
+      readAt,
+    };
+  });
+
+  return {
+    noticeId: notice.id,
+    audienceCount: notice.audienceCount,
+    readCount: notice.readCount,
+    deliveredCount: recipients.filter((recipient) => recipient.delivered).length,
+    unreadCount: recipients.filter((recipient) => !recipient.read).length,
+    recipientCount: recipients.length,
+    truncated: membersSnapshot.docs.length === READ_STATUS_LIMIT,
+    recipients,
   };
 }

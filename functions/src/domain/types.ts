@@ -135,6 +135,70 @@ export interface FanoutStats {
   complete: boolean;
 }
 
+export interface UnitImportData {
+  projectId: string;
+  csv: string;
+  dryRun: boolean;
+}
+
+export interface UnitImportRow {
+  row: number;
+  towerId: string;
+  unitId: string;
+  label: string;
+  status: 'create' | 'unchanged' | 'error';
+  message: string | null;
+}
+
+export interface UnitImportResult {
+  dryRun: boolean;
+  rows: UnitImportRow[];
+  created: number;
+  unchanged: number;
+  failed: number;
+  complete: boolean;
+}
+
+export interface GenerateInviteData {
+  projectId: string;
+  towerId: string;
+  unitId: string;
+  expiresInHours: number;
+}
+
+export interface GenerateInviteResult {
+  code: string;
+  projectId: string;
+  towerId: string;
+  unitId: string;
+  expiresAt: string;
+}
+
+export interface NoticeReadStatusData {
+  projectId: string;
+  noticeId: string;
+}
+
+export interface NoticeReadStatusRecipient {
+  uid: string;
+  towerId: string | null;
+  unitId: string | null;
+  delivered: boolean;
+  read: boolean;
+  readAt: string | null;
+}
+
+export interface NoticeReadStatusResult {
+  noticeId: string;
+  audienceCount: number;
+  readCount: number;
+  deliveredCount: number;
+  unreadCount: number;
+  recipientCount: number;
+  truncated: boolean;
+  recipients: NoticeReadStatusRecipient[];
+}
+
 export interface RedeemInviteData {
   code: string;
 }

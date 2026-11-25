@@ -4,15 +4,18 @@ import type {
   FanoutFailureDoc,
   FeedEntryDoc,
   FirestoreTimestamp,
+  GenerateInviteData,
   InviteDoc,
   MarkNoticeReadData,
   MembershipDoc,
   NoticeDoc,
+  NoticeReadStatusData,
   ProjectDoc,
   RedeemInviteData,
   SetNoticePinnedData,
   TowerDoc,
   UnitDoc,
+  UnitImportData,
 } from './domain/types';
 import { invalidPayload } from './errors';
 
@@ -105,6 +108,30 @@ const setNoticePinnedSchema = z
   .strict();
 
 const markNoticeReadSchema = z
+  .object({
+    projectId: slugSchema,
+    noticeId: slugSchema,
+  })
+  .strict();
+
+const unitImportSchema = z
+  .object({
+    projectId: slugSchema,
+    csv: z.string().trim().min(1).max(200000),
+    dryRun: z.boolean().default(false),
+  })
+  .strict();
+
+const generateInviteSchema = z
+  .object({
+    projectId: slugSchema,
+    towerId: idSchema,
+    unitId: idSchema,
+    expiresInHours: z.number().int().min(1).max(720).default(168),
+  })
+  .strict();
+
+const noticeReadStatusSchema = z
   .object({
     projectId: slugSchema,
     noticeId: slugSchema,
@@ -255,6 +282,34 @@ export function parseMarkNoticeRead(value: unknown): MarkNoticeReadData {
     throw invalidPayload();
   }
   return result.data;
+}
+
+export function parseUnitImport(value: unknown): UnitImportData {
+  const result = unitImportSchema.safeParse(value);
+  if (!result.success) {
+    throw invalidPayload();
+  }
+  return result.data;
+}
+
+export function parseGenerateInvite(value: unknown): GenerateInviteData {
+  const result = generateInviteSchema.safeParse(value);
+  if (!result.success) {
+    throw invalidPayload();
+  }
+  return result.data;
+}
+
+export function parseNoticeReadStatus(value: unknown): NoticeReadStatusData {
+  const result = noticeReadStatusSchema.safeParse(value);
+  if (!result.success) {
+    throw invalidPayload();
+  }
+  return result.data;
+}
+
+export function isValidId(value: string): boolean {
+  return idSchema.safeParse(value).success;
 }
 
 export function parseProject(value: unknown): ProjectDoc {

@@ -1,11 +1,19 @@
+import { randomBytes } from 'crypto';
+import { Timestamp } from 'firebase-admin/firestore';
 import type { DocumentSnapshot } from 'firebase-admin/firestore';
-import type { RedeemInviteData, RedeemInviteResult } from '../domain/types';
-import { invalidInvite } from '../errors';
+import type {
+  GenerateInviteData,
+  GenerateInviteResult,
+  RedeemInviteData,
+  RedeemInviteResult,
+} from '../domain/types';
+import { internal, invalidInvite } from '../errors';
 import { backfillBuyer } from '../fanout';
 import { db, timestampNow } from '../firestore';
 import { paths } from '../paths';
 import { hashInviteCode } from '../security';
 import {
+  normalizeInviteCode,
   parseInvite,
   parseMembership,
   parseProject,
@@ -23,6 +31,63 @@ function parseDocument<T>(
     throw invalidInvite();
   }
   return parser({ ...toRecord(snapshot.data()), id });
+}
+
+export async function generateInvite(
+  builderUid: string,
+  data: GenerateInviteData,
+): Promise<GenerateInviteResult> {
+  const projectSnapshot = await db.doc(paths.project(data.projectId)).get();
+  parseDocument(projectSnapshot, parseProject, data.projectId);
+  const towerSnapshot = await db.doc(paths.tower(data.projectId, data.towerId)).get();
+  const tower = parseDocument(towerSnapshot, parseTower, data.towerId);
+  const unitSnapshot = await db.doc(paths.unit(data.projectId, data.unitId)).get();
+  const unit = parseDocument(unitSnapshot, parseUnit, data.unitId);
+
+  if (tower.projectId !== data.projectId || unit.projectId !== data.projectId || unit.towerId !== data.towerId) {
+    throw invalidInvite();
+  }
+
+  const expiresAt = Timestamp.fromMillis(Date.now() + data.expiresInHours * 60 * 60 * 1000);
+  const createdAt = timestampNow();
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = randomBytes(12).toString('hex').toUpperCase();
+    const codeHash = hashInviteCode(normalizeInviteCode(code));
+    const inviteRef = db.doc(paths.invite(codeHash));
+
+    const committed = await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(inviteRef);
+      if (snapshot.exists) {
+        return false;
+      }
+      transaction.set(inviteRef, {
+        id: codeHash,
+        projectId: data.projectId,
+        towerId: data.towerId,
+        unitId: data.unitId,
+        codeHash,
+        createdByUid: builderUid,
+        createdAt,
+        expiresAt,
+        usedByUid: null,
+        usedAt: null,
+      });
+      return true;
+    });
+
+    if (committed) {
+      return {
+        code,
+        projectId: data.projectId,
+        towerId: data.towerId,
+        unitId: data.unitId,
+        expiresAt: expiresAt.toDate().toISOString(),
+      };
+    }
+  }
+
+  throw internal();
 }
 
 export async function redeemInvite(
