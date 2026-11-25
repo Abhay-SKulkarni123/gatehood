@@ -1,5 +1,6 @@
+import type { AudienceType } from '@/types/domain';
+import { describeNoticeAudienceSummary, type NoticeAudienceSummary } from '@/lib/ui/notices';
 import { parseConstructionProgressInput } from '@/lib/ui/unit-info';
-import { describeNoticeAudienceSummary } from '@/lib/ui/notices';
 
 describe('Phase 7 UI logic', () => {
   test('construction progress accepts only whole percentages from 0 to 100', () => {
@@ -15,28 +16,31 @@ describe('Phase 7 UI logic', () => {
     expect(parseConstructionProgressInput('abc')).toBeNull();
   });
 
-  test('notice audience summaries are readable and handle single or multiple targets', () => {
+  test('notice audience summaries use human-friendly labels without raw ids', () => {
     expect(describeNoticeAudienceSummary({ audienceType: 'project' })).toBe('All buyers');
-    expect(
-      describeNoticeAudienceSummary({ audienceType: 'tower', audienceTowerIds: ['tower-1'] }),
-    ).toBe('Tower tower-1');
-    expect(
-      describeNoticeAudienceSummary({
-        audienceType: 'tower',
-        audienceTowerIds: ['tower-1', 'tower-2'],
-      }),
-    ).toBe('Towers tower-1, tower-2');
-    expect(
-      describeNoticeAudienceSummary({ audienceType: 'unit', audienceUnitIds: ['unit-1'] }),
-    ).toBe('Unit unit-1');
-    expect(
-      describeNoticeAudienceSummary({
-        audienceType: 'unit',
-        audienceUnitIds: ['unit-1', 'unit-2'],
-      }),
-    ).toBe('Units unit-1, unit-2');
-    expect(describeNoticeAudienceSummary({ audienceType: 'tower' })).toBe('Selected towers');
-    expect(describeNoticeAudienceSummary({ audienceType: 'unit' })).toBe('Selected units');
+
+    const towerAudience = {
+      audienceType: 'tower',
+      audienceTowerIds: ['tower-1', 'tower-2'],
+    } as unknown as NoticeAudienceSummary;
+    expect(describeNoticeAudienceSummary(towerAudience)).toBe('Your tower');
+
+    const unitAudience = {
+      audienceType: 'unit',
+      audienceUnitIds: ['unit-1', 'unit-2'],
+    } as unknown as NoticeAudienceSummary;
+    expect(describeNoticeAudienceSummary(unitAudience)).toBe('Your unit');
+  });
+
+  test('notice audience summaries handle empty or malformed metadata', () => {
     expect(describeNoticeAudienceSummary({})).toBe('All buyers');
+    expect(describeNoticeAudienceSummary(null)).toBe('All buyers');
+    expect(describeNoticeAudienceSummary(undefined)).toBe('All buyers');
+    expect(
+      describeNoticeAudienceSummary({ audienceType: 'unexpected' as AudienceType }),
+    ).toBe('All buyers');
+    expect(
+      describeNoticeAudienceSummary({ audienceType: 42 as unknown as AudienceType }),
+    ).toBe('All buyers');
   });
 });

@@ -571,11 +571,11 @@ export default function BuilderHomeScreen() {
                       <View style={styles.unitInfo}>
                         <Text style={styles.rowTitle}>{unit.label}</Text>
                         <Text style={styles.rowDetail}>
-                          {towerNames.get(unit.towerId) ?? unit.towerId} · {unit.id}
+                          {towerNames.get(unit.towerId) ?? 'Tower not available'}
                         </Text>
                         <StatusBadge
-                          label={buyer ? `Joined as ${buyer.uid}` : 'Not joined'}
-                          tone={buyer ? 'accent' : 'danger'}
+                          label={buyer ? 'Joined' : 'Not joined'}
+                          tone={buyer ? 'accent' : 'muted'}
                         />
                         {contactLabel ? (
                           <Text style={styles.rowDetail}>Imported: {contactLabel}</Text>
@@ -816,7 +816,7 @@ export default function BuilderHomeScreen() {
                       ) : (
                         readStatus.recipients.map((recipient) => (
                           <Text key={recipient.uid} style={styles.rowDetail}>
-                            {unitLabels.get(recipient.unitId ?? '') ?? recipient.unitId ?? recipient.uid}:{' '}
+                            {unitLabels.get(recipient.unitId ?? '') ?? 'Unassigned buyer'}:{' '}
                             {recipient.read
                               ? `Read ${formatTimestamp(recipient.readAt as string)}`
                               : recipient.delivered

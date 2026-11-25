@@ -1,29 +1,18 @@
 import type { AudienceType } from '@/types/domain';
 
-type AudienceSummary = {
-  audienceTowerIds?: readonly string[] | null;
+export type NoticeAudienceSummary = {
   audienceType?: AudienceType | null;
-  audienceUnitIds?: readonly string[] | null;
 };
 
-export function describeNoticeAudienceSummary(audience: AudienceSummary): string {
-  const towerIds = audience.audienceTowerIds ?? [];
-  const unitIds = audience.audienceUnitIds ?? [];
-
-  if (audience.audienceType === 'tower') {
-    if (towerIds.length === 0) {
-      return 'Selected towers';
-    }
-    return towerIds.length === 1
-      ? `Tower ${towerIds[0]}`
-      : `Towers ${towerIds.join(', ')}`;
+export function describeNoticeAudienceSummary(
+  audience: NoticeAudienceSummary | null | undefined,
+): string {
+  if (audience?.audienceType === 'tower') {
+    return 'Your tower';
   }
 
-  if (audience.audienceType === 'unit') {
-    if (unitIds.length === 0) {
-      return 'Selected units';
-    }
-    return unitIds.length === 1 ? `Unit ${unitIds[0]}` : `Units ${unitIds.join(', ')}`;
+  if (audience?.audienceType === 'unit') {
+    return 'Your unit';
   }
 
   return 'All buyers';
