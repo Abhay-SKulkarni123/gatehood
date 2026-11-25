@@ -1,8 +1,27 @@
-import { validateBuyerCsv } from '@/lib/csv/buyer-import';
+import {
+  canCommitBuyerImport,
+  createBuyerCsvState,
+  validateBuyerCsv,
+} from '@/lib/csv/buyer-import';
 import { isBuyerContactDoc, isFeedEntryDoc, isNoticeDoc, isUnitDoc } from '@/lib/data/parse';
 import { sortBuyerFeed } from '@/lib/data/sort';
 import { describeCallableError } from '@/lib/functions/errors';
 import { parseIdList } from '@/utils/identifiers';
+import type { BuyerImportResult } from '@/types/domain';
+
+const buyerCsv = 'Tower,Unit,Name,Phone\nTower 1,Unit 101,Asha,+15550104\n';
+
+function successfulPreview(overrides: Partial<BuyerImportResult> = {}): BuyerImportResult {
+  return {
+    dryRun: true,
+    rows: [{ row: 2, tower: 'Tower 1', unit: 'Unit 101', name: 'Asha', phone: '+15550104', status: 'create', message: null }],
+    created: 1,
+    unchanged: 0,
+    failed: 0,
+    complete: true,
+    ...overrides,
+  };
+}
 
 function timestampAt(millis: number) {
   return {
@@ -156,5 +175,105 @@ describe('Phase 4 client helpers', () => {
       'newer-read',
       'old-unread',
     ]);
+  });
+
+  it('keeps import disabled until a successful server preview exists', () => {
+    const state = createBuyerCsvState(buyerCsv);
+    expect(
+      canCommitBuyerImport({
+        ...state,
+        importPreview: null,
+        previewPending: false,
+        importPending: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      canCommitBuyerImport({
+        ...state,
+        importPreview: successfulPreview(),
+        previewPending: false,
+        importPending: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps import disabled for unsuccessful previews and client errors', () => {
+    const state = createBuyerCsvState(buyerCsv);
+    expect(
+      canCommitBuyerImport({
+        ...state,
+        importPreview: successfulPreview({ complete: false, failed: 1 }),
+        previewPending: false,
+        importPending: false,
+      }),
+    ).toBe(false);
+    expect(
+      canCommitBuyerImport({
+        ...state,
+        importPreview: successfulPreview({ dryRun: false }),
+        previewPending: false,
+        importPending: false,
+      }),
+    ).toBe(false);
+
+    const invalidState = createBuyerCsvState(
+      'Tower,Unit,Name,Phone\nTower 1,Unit 101,Asha,123\n',
+    );
+    expect(invalidState.clientCsvErrors.length).toBeGreaterThan(0);
+    expect(
+      canCommitBuyerImport({
+        ...invalidState,
+        importPreview: successfulPreview(),
+        previewPending: false,
+        importPending: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('invalidates the preview when CSV content changes', () => {
+    const previewedState = createBuyerCsvState(buyerCsv);
+    expect(
+      canCommitBuyerImport({
+        ...previewedState,
+        importPreview: successfulPreview(),
+        previewPending: false,
+        importPending: false,
+      }),
+    ).toBe(true);
+
+    const editedState = createBuyerCsvState(
+      'Tower,Unit,Name,Phone\nTower 1,Unit 102,Meera,+15550105\n',
+    );
+    expect(editedState.importPreview).toBeNull();
+    expect(
+      canCommitBuyerImport({
+        ...editedState,
+        previewPending: false,
+        importPending: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps import disabled while preview or import requests are running', () => {
+    const state = createBuyerCsvState(buyerCsv);
+    const importPreview = successfulPreview();
+
+    expect(
+      canCommitBuyerImport({
+        ...state,
+        importPreview,
+        previewPending: true,
+        importPending: false,
+      }),
+    ).toBe(false);
+    expect(
+      canCommitBuyerImport({
+        ...state,
+        importPreview,
+        previewPending: false,
+        importPending: true,
+      }),
+    ).toBe(false);
   });
 });

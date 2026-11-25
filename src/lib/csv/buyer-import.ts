@@ -1,4 +1,4 @@
-import type { BuyerImportRow } from '@/types/domain';
+import type { BuyerImportResult, BuyerImportRow } from '@/types/domain';
 
 export type BuyerCsvValidation = {
   rows: BuyerImportRow[];
@@ -216,4 +216,56 @@ export function validateBuyerCsv(csv: string): BuyerCsvValidation {
     .filter((row) => row.status === 'error')
     .map((row) => `Row ${row.row}: ${row.message ?? 'Invalid row.'}`);
   return { rows: finalRows, errors, valid: errors.length === 0 };
+}
+
+export type BuyerCsvState = {
+  csv: string;
+  csvFileName: string | null;
+  clientCsvErrors: string[];
+  importPreview: null;
+};
+
+export function createBuyerCsvState(
+  value: string,
+  fileName: string | null = null,
+): BuyerCsvState {
+  const validation = validateBuyerCsv(value);
+  return {
+    csv: value,
+    csvFileName: fileName,
+    clientCsvErrors: validation.errors,
+    importPreview: null,
+  };
+}
+
+export type BuyerImportCommitGate = {
+  csv: string;
+  clientCsvErrors: readonly string[];
+  importPreview: BuyerImportResult | null;
+  previewPending: boolean;
+  importPending: boolean;
+};
+
+export function canCommitBuyerImport({
+  csv,
+  clientCsvErrors,
+  importPreview,
+  previewPending,
+  importPending,
+}: BuyerImportCommitGate): boolean {
+  if (
+    csv.trim().length === 0 ||
+    clientCsvErrors.length > 0 ||
+    previewPending ||
+    importPending
+  ) {
+    return false;
+  }
+
+  return (
+    importPreview !== null &&
+    importPreview.dryRun &&
+    importPreview.complete &&
+    importPreview.failed === 0
+  );
 }

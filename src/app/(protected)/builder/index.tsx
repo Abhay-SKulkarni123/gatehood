@@ -9,7 +9,10 @@ import { LoadingIndicator } from '@/components/loading-indicator';
 import { PrimaryButton } from '@/components/primary-button';
 import { Screen } from '@/components/screen';
 import { getClientConfig } from '@/config/env';
-import { validateBuyerCsv } from '@/lib/csv/buyer-import';
+import {
+  canCommitBuyerImport,
+  createBuyerCsvState,
+} from '@/lib/csv/buyer-import';
 import type { BuilderSnapshot } from '@/lib/data/builder';
 import { loadBuilderSnapshot } from '@/lib/data/builder';
 import {
@@ -167,11 +170,11 @@ export default function BuilderHomeScreen() {
   }, [snapshot]);
 
   const applyCsv = (value: string, fileName: string | null = null) => {
-    const validation = validateBuyerCsv(value);
-    setCsv(value);
-    setCsvFileName(fileName);
-    setClientCsvErrors(validation.errors);
-    setImportPreview(null);
+    const nextState = createBuyerCsvState(value, fileName);
+    setCsv(nextState.csv);
+    setCsvFileName(nextState.csvFileName);
+    setClientCsvErrors(nextState.clientCsvErrors);
+    setImportPreview(nextState.importPreview);
   };
 
   const handlePickCsv = async () => {
@@ -336,6 +339,13 @@ export default function BuilderHomeScreen() {
     title.trim().length > 0 &&
     body.trim().length > 0 &&
     (audienceType === 'project' || parseIdList(audienceIds).length > 0);
+  const canCommitImport = canCommitBuyerImport({
+    csv,
+    clientCsvErrors,
+    importPreview,
+    previewPending: busy === 'import-preview',
+    importPending: busy === 'import',
+  });
 
   return (
     <Screen>
@@ -393,6 +403,10 @@ export default function BuilderHomeScreen() {
               tower and unit names are reused; contact details are stored separately from buyer
               feeds.
             </Text>
+            <Text style={styles.previewSummary}>
+              Preview the CSV before importing. Import unlocks only after a successful server-side
+              preview; editing the CSV requires a new preview.
+            </Text>
             <PrimaryButton
               label="Choose CSV file"
               loading={busy === 'csv-pick'}
@@ -425,11 +439,7 @@ export default function BuilderHomeScreen() {
                 onPress={() => void handleImport(true)}
               />
               <PrimaryButton
-                disabled={
-                  !csv.trim() ||
-                  clientCsvErrors.length > 0 ||
-                  (importPreview !== null && !importPreview.complete)
-                }
+                disabled={!canCommitImport}
                 label="Import buyers"
                 loading={busy === 'import'}
                 onPress={() => void handleImport(false)}
