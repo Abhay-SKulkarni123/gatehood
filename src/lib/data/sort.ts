@@ -26,26 +26,20 @@ export function filterBuyerFeed(
   }
 
   return entries.filter((entry) => {
-    if (filter === 'unit') {
-      return (
-        entry.audienceType === 'unit' &&
-        recipient.unitId !== null &&
-        (entry.audienceUnitIds ?? []).includes(recipient.unitId)
-      );
+    if (entry.audienceType === 'project') {
+      return true;
     }
-
     if (entry.audienceType === 'tower') {
       return (
         recipient.towerId !== null &&
         (entry.audienceTowerIds ?? []).includes(recipient.towerId)
       );
     }
-    if (entry.audienceType === 'unit') {
-      return (
-        recipient.unitId !== null &&
-        (entry.audienceUnitIds ?? []).includes(recipient.unitId)
-      );
-    }
-    return false;
+    return (
+      filter === 'unit' &&
+      entry.audienceType === 'unit' &&
+      recipient.unitId !== null &&
+      (entry.audienceUnitIds ?? []).includes(recipient.unitId)
+    );
   });
 }

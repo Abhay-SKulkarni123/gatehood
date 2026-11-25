@@ -2,7 +2,7 @@ import { collection, doc, getDoc, onSnapshot } from '@react-native-firebase/fire
 import type { Firestore } from '@react-native-firebase/firestore';
 import type { FeedEntryDoc, FirestoreTimestamp, MembershipDoc } from '@/types/domain';
 import { loadBuyerUnit } from '@/lib/data/units';
-import { subscribeBuyerFeed } from '@/lib/data/buyer';
+import { loadBuyerProject, subscribeBuyerFeed } from '@/lib/data/buyer';
 
 jest.mock('@react-native-firebase/firestore', () => ({
   collection: jest.fn(),
@@ -157,4 +157,29 @@ test('buyer unit loading validates the assigned unit and rejects another project
   await expect(
     loadBuyerUnit(firestore, membership({ unitId: null, towerId: null })),
   ).resolves.toBeNull();
+});
+
+test('buyer project loading validates the project from the buyer membership', async () => {
+  mockDoc.mockReturnValue('project-ref');
+  const projectData = {
+    id: 'project-1',
+    name: 'Sunrise Residences',
+    createdByUid: 'builder-1',
+    createdAt: timestamp,
+  };
+  mockGetDoc.mockResolvedValue({ exists: true, id: 'project-1', data: () => projectData });
+
+  const project = await loadBuyerProject(firestore, membership());
+  expect(mockDoc).toHaveBeenCalledWith(firestore, 'projects', 'project-1');
+  expect(project).toMatchObject({ id: 'project-1', name: 'Sunrise Residences' });
+
+  mockGetDoc.mockResolvedValue({
+    exists: true,
+    id: 'project-1',
+    data: () => ({ ...projectData, name: '' }),
+  });
+  await expect(loadBuyerProject(firestore, membership())).resolves.toBeNull();
+
+  mockGetDoc.mockResolvedValue({ exists: false, id: 'project-1', data: () => projectData });
+  await expect(loadBuyerProject(firestore, membership())).resolves.toBeNull();
 });

@@ -1,7 +1,7 @@
-import { collection, getDocs, onSnapshot } from '@react-native-firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot } from '@react-native-firebase/firestore';
 import type { Firestore } from '@react-native-firebase/firestore';
-import type { FeedEntryDoc } from '@/types/domain';
-import { isFeedEntryDoc } from './parse';
+import type { FeedEntryDoc, MembershipDoc, ProjectDoc } from '@/types/domain';
+import { isFeedEntryDoc, isProjectDoc } from './parse';
 import { sortBuyerFeed } from './sort';
 
 type FeedSnapshot = { docs: { id: string; data: () => unknown }[] };
@@ -15,6 +15,19 @@ function feedEntriesFromSnapshot(
     const value = document.data();
     return isFeedEntryDoc(value, uid, document.id) && value.projectId === projectId ? [value] : [];
   });
+}
+
+export async function loadBuyerProject(
+  firestore: Firestore,
+  membership: MembershipDoc,
+): Promise<ProjectDoc | null> {
+  const snapshot = await getDoc(doc(firestore, 'projects', membership.projectId));
+  if (!snapshot.exists) {
+    return null;
+  }
+
+  const value = { ...snapshot.data(), id: snapshot.id };
+  return isProjectDoc(value, membership.projectId) ? value : null;
 }
 
 export async function loadBuyerFeed(

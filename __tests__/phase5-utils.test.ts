@@ -4,7 +4,7 @@ jest.mock('@react-native-firebase/firestore', () => ({
 }));
 
 import type { FeedEntryDoc, FirestoreTimestamp } from '@/types/domain';
-import { filterBuyerFeed } from '@/lib/data/sort';
+import { filterBuyerFeed, sortBuyerFeed } from '@/lib/data/sort';
 import {
   describeConstructionProgress,
   describePossessionDate,
@@ -30,6 +30,7 @@ function timestampAt(millis: number): FirestoreTimestamp {
 function feedEntry(
   noticeId: string,
   audience: Pick<FeedEntryDoc, 'audienceType' | 'audienceTowerIds' | 'audienceUnitIds'>,
+  overrides: Partial<FeedEntryDoc> = {},
 ): FeedEntryDoc {
   const timestamp = timestampAt(1000);
   return {
@@ -43,6 +44,7 @@ function feedEntry(
     updatedAt: timestamp,
     readAt: null,
     ...audience,
+    ...overrides,
   };
 }
 
@@ -90,44 +92,74 @@ describe('Phase 5 buyer helpers', () => {
     expect(describePossessionDate(timestampAt(Date.UTC(2026, 0, 12)), now)).toContain('in 2 days');
   });
 
-  it('filters notices by target without exposing other audiences', () => {
+  it('filters by audience while preserving pinned-first, newest-second order', () => {
     const recipient = { towerId: 'tower-1', unitId: 'unit-1' };
-    const entries = [
-      feedEntry('project', { audienceType: 'project', audienceTowerIds: [], audienceUnitIds: [] }),
-      feedEntry('tower', {
-        audienceType: 'tower',
-        audienceTowerIds: ['tower-1'],
-        audienceUnitIds: [],
-      }),
-      feedEntry('other-tower', {
-        audienceType: 'tower',
-        audienceTowerIds: ['tower-2'],
-        audienceUnitIds: [],
-      }),
-      feedEntry('unit', { audienceType: 'unit', audienceTowerIds: [], audienceUnitIds: ['unit-1'] }),
-      feedEntry('other-unit', {
-        audienceType: 'unit',
-        audienceTowerIds: [],
-        audienceUnitIds: ['unit-2'],
-      }),
-      feedEntry('legacy', { audienceType: undefined, audienceTowerIds: undefined, audienceUnitIds: undefined }),
-    ];
+    const entries = sortBuyerFeed([
+      feedEntry(
+        'matching-unit',
+        { audienceType: 'unit', audienceTowerIds: [], audienceUnitIds: ['unit-1'] },
+        { deliveredAt: timestampAt(1000) },
+      ),
+      feedEntry(
+        'other-tower',
+        {
+          audienceType: 'tower',
+          audienceTowerIds: ['tower-2'],
+          audienceUnitIds: [],
+        },
+        { deliveredAt: timestampAt(500) },
+      ),
+      feedEntry(
+        'legacy',
+        {
+          audienceType: undefined,
+          audienceTowerIds: undefined,
+          audienceUnitIds: undefined,
+        },
+        { deliveredAt: timestampAt(300) },
+      ),
+      feedEntry(
+        'matching-tower',
+        {
+          audienceType: 'tower',
+          audienceTowerIds: ['tower-1'],
+          audienceUnitIds: [],
+        },
+        { deliveredAt: timestampAt(2000) },
+      ),
+      feedEntry(
+        'project-pinned',
+        { audienceType: 'project', audienceTowerIds: [], audienceUnitIds: [] },
+        { pinned: true, deliveredAt: timestampAt(3000) },
+      ),
+      feedEntry(
+        'other-unit',
+        {
+          audienceType: 'unit',
+          audienceTowerIds: [],
+          audienceUnitIds: ['unit-2'],
+        },
+        { deliveredAt: timestampAt(400) },
+      ),
+    ]);
+    const noticeIds = (filter: 'all' | 'tower' | 'unit', value: typeof recipient | null) =>
+      filterBuyerFeed(entries, value, filter).map((entry) => entry.noticeId);
 
-    expect(filterBuyerFeed(entries, recipient, 'all').map((entry) => entry.noticeId)).toEqual([
-      'project',
-      'tower',
+    expect(noticeIds('all', recipient)).toEqual([
+      'project-pinned',
+      'matching-tower',
+      'matching-unit',
       'other-tower',
-      'unit',
       'other-unit',
       'legacy',
     ]);
-    expect(filterBuyerFeed(entries, recipient, 'tower').map((entry) => entry.noticeId)).toEqual([
-      'tower',
-      'unit',
-    ]);
-    expect(filterBuyerFeed(entries, recipient, 'unit').map((entry) => entry.noticeId)).toEqual([
-      'unit',
+    expect(noticeIds('tower', recipient)).toEqual(['project-pinned', 'matching-tower']);
+    expect(noticeIds('unit', recipient)).toEqual([
+      'project-pinned',
+      'matching-tower',
+      'matching-unit',
     ]);
     expect(filterBuyerFeed(entries, null, 'tower')).toEqual([]);
+    expect(filterBuyerFeed(entries, null, 'unit')).toEqual([]);
   });
 });

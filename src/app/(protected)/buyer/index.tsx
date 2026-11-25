@@ -7,7 +7,7 @@ import { LoadingIndicator } from '@/components/loading-indicator';
 import { PrimaryButton } from '@/components/primary-button';
 import { Screen } from '@/components/screen';
 import { getClientConfig } from '@/config/env';
-import { subscribeBuyerFeed } from '@/lib/data/buyer';
+import { loadBuyerProject, subscribeBuyerFeed } from '@/lib/data/buyer';
 import {
   describeConstructionProgress,
   describePossessionDate,
@@ -18,7 +18,7 @@ import { callMarkNoticeRead, describeCallableError } from '@/lib/functions';
 import { getFirebaseServices } from '@/lib/firebase';
 import { useAuth } from '@/providers/auth-provider';
 import { useMembership } from '@/providers/membership-provider';
-import type { FeedEntryDoc, FirestoreTimestamp, UnitDoc } from '@/types/domain';
+import type { FeedEntryDoc, FirestoreTimestamp, ProjectDoc, UnitDoc } from '@/types/domain';
 import { colors, radius, spacing, typography } from '@/theme';
 
 function formatTimestamp(value: FirestoreTimestamp): string {
@@ -36,6 +36,10 @@ export default function BuyerHomeScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [feedRetryKey, setFeedRetryKey] = useState(0);
   const [feedFilter, setFeedFilter] = useState<BuyerFeedFilter>('all');
+  const [project, setProject] = useState<ProjectDoc | null>(null);
+  const [projectLoading, setProjectLoading] = useState(true);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [projectRetryKey, setProjectRetryKey] = useState(0);
   const [unit, setUnit] = useState<UnitDoc | null>(null);
   const [unitLoading, setUnitLoading] = useState(true);
   const [unitError, setUnitError] = useState<string | null>(null);
@@ -72,6 +76,38 @@ export default function BuyerHomeScreen() {
       return undefined;
     }
   }, [constructionProjectId, uid, feedRetryKey]);
+
+  useEffect(() => {
+    if (!membershipRecord) {
+      return;
+    }
+
+    let active = true;
+    const run = async () => {
+      setProjectLoading(true);
+      setProjectError(null);
+      setProject(null);
+      try {
+        const { firestore } = getFirebaseServices();
+        const data = await loadBuyerProject(firestore, membershipRecord);
+        if (active) {
+          setProject(data);
+        }
+      } catch (projectLoadError) {
+        if (active) {
+          setProjectError(describeCallableError(projectLoadError));
+        }
+      } finally {
+        if (active) {
+          setProjectLoading(false);
+        }
+      }
+    };
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [membershipRecord, projectRetryKey]);
 
   useEffect(() => {
     if (!membershipRecord) {
@@ -140,7 +176,22 @@ export default function BuyerHomeScreen() {
       {membershipRecord ? (
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>My unit</Text>
-          <Text style={styles.detail}>Project: {membershipRecord.projectId}</Text>
+          {projectLoading ? (
+            <LoadingIndicator label="Loading project details…" />
+          ) : projectError ? (
+            <ErrorState
+              message={projectError}
+              onRetry={() => {
+                setProjectLoading(true);
+                setProjectError(null);
+                setProjectRetryKey((value) => value + 1);
+              }}
+              retryLabel="Retry project details"
+              title="Project details unavailable"
+            />
+          ) : (
+            <Text style={styles.detail}>Project: {project?.name ?? 'Not available'}</Text>
+          )}
           <Text style={styles.detail}>Tower: {membershipRecord.towerId ?? 'Not assigned'}</Text>
           <Text style={styles.detail}>Unit: {membershipRecord.unitId ?? 'Not assigned'}</Text>
           {unitLoading ? (
@@ -155,6 +206,24 @@ export default function BuyerHomeScreen() {
               <Text style={styles.detail}>
                 Construction: {describeConstructionProgress(unit?.constructionProgress)}
               </Text>
+              {typeof unit?.constructionProgress === 'number' ? (
+                <View
+                  accessible
+                  accessibilityLabel="Construction progress"
+                  accessibilityRole="progressbar"
+                  accessibilityValue={{
+                    max: 100,
+                    min: 0,
+                    now: unit.constructionProgress,
+                    text: `${unit.constructionProgress}% complete`,
+                  }}
+                  style={styles.progressTrack}
+                >
+                  <View
+                    style={[styles.progressFill, { width: `${unit.constructionProgress}%` }]}
+                  />
+                </View>
+              ) : null}
               <Text style={styles.detail}>{describePossessionDate(unit?.possessionDate)}</Text>
               {unit === null ? (
                 <Text style={styles.detail}>Your builder has not added these details yet.</Text>
@@ -200,10 +269,10 @@ export default function BuyerHomeScreen() {
           <EmptyState
             message={
               feedFilter === 'tower'
-                ? 'No notices are targeted to your tower or unit yet.'
+                ? 'No project-wide or matching tower notices have been delivered.'
                 : feedFilter === 'unit'
-                  ? 'No notices are targeted to your unit yet.'
-                  : 'Your builder has not published a notice for this unit yet.'
+                  ? 'No project-wide, matching tower, or matching unit notices have been delivered.'
+                  : 'No notices have been delivered to your feed yet.'
             }
             title="No notices"
           />
@@ -268,6 +337,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
+  },
+  progressTrack: {
+    backgroundColor: colors.border,
+    borderRadius: radius.sm,
+    height: 8,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  progressFill: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.sm,
+    height: '100%',
   },
   detail: {
     ...typography.caption,
