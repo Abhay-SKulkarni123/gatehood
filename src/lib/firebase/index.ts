@@ -1,29 +1,34 @@
-import { getApp } from '@react-native-firebase/app';
+import { getApp, getApps, initializeApp } from '@react-native-firebase/app';
 import {
-  initializeAppCheck,
+  initializeAppCheck as initializeNativeAppCheck,
   ReactNativeFirebaseAppCheckProvider,
 } from '@react-native-firebase/app-check';
 import { connectAuthEmulator, getAuth } from '@react-native-firebase/auth';
 import {
   connectFirestoreEmulator,
+  getFirestore,
   initializeFirestore,
 } from '@react-native-firebase/firestore';
 import { connectFunctionsEmulator, getFunctions } from '@react-native-firebase/functions';
 import { Platform } from 'react-native';
 import type { ClientConfig } from '@/config/env';
 import type { FirebaseServices } from '@/types/firebase';
+import {
+  currentFirebasePlatform,
+  resolveEmulatorHost,
+  resolveWebAppCheckProvider,
+  toWebFirebaseOptions,
+} from './platform';
+import { initializeWebAppCheck } from './web-app-check';
 
 let cachedAppCheck: FirebaseServices['appCheck'] | null = null;
 let cachedServices: FirebaseServices | null = null;
+let initializationPromise: Promise<FirebaseServices> | null = null;
 let authEmulatorConnected = false;
 let firestoreEmulatorConnected = false;
 let functionsEmulatorConnected = false;
 
-function emulatorHost(): string {
-  return Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
-}
-
-function getAppCheck(app: FirebaseServices['app']): FirebaseServices['appCheck'] {
+function getNativeAppCheck(app: FirebaseServices['app']): FirebaseServices['appCheck'] {
   if (cachedAppCheck) {
     return cachedAppCheck;
   }
@@ -38,7 +43,7 @@ function getAppCheck(app: FirebaseServices['app']): FirebaseServices['appCheck']
     },
   });
 
-  cachedAppCheck = initializeAppCheck(app, {
+  cachedAppCheck = initializeNativeAppCheck(app, {
     provider,
     isTokenAutoRefreshEnabled: true,
   });
@@ -46,26 +51,43 @@ function getAppCheck(app: FirebaseServices['app']): FirebaseServices['appCheck']
   return cachedAppCheck;
 }
 
-export function getFirebaseServices(): FirebaseServices {
-  if (!cachedServices) {
-    throw new Error('Firebase has not been initialized.');
+async function ensureFirebaseApp(
+  config: ClientConfig,
+  platform: ReturnType<typeof currentFirebasePlatform>,
+): Promise<FirebaseServices['app']> {
+  if (platform === 'web') {
+    const webConfig = config.webFirebase;
+    if (!webConfig) {
+      throw new Error('Firebase web configuration is required when running on web.');
+    }
+
+    resolveWebAppCheckProvider(webConfig, __DEV__ || config.useFirebaseEmulator);
+
+    if (getApps().length === 0) {
+      await initializeApp(toWebFirebaseOptions(webConfig));
+    }
   }
-  return cachedServices;
+
+  return getApp();
 }
 
-export function initializeFirebase(config: ClientConfig): FirebaseServices {
-  if (cachedServices) {
-    return cachedServices;
-  }
-
-  const app = getApp();
-  const appCheck = getAppCheck(app);
+async function initializeFirebaseServices(
+  config: ClientConfig,
+  platform: ReturnType<typeof currentFirebasePlatform>,
+): Promise<FirebaseServices> {
+  const app = await ensureFirebaseApp(config, platform);
+  const useDebugWebAppCheck = __DEV__ || config.useFirebaseEmulator;
+  const appCheck =
+    platform === 'web' && config.webFirebase
+      ? initializeWebAppCheck(app.name, config.webFirebase, useDebugWebAppCheck)
+      : getNativeAppCheck(app);
   const auth = getAuth(app);
-  const firestore = initializeFirestore(app, { persistence: true });
+  const firestore =
+    platform === 'web' ? getFirestore(app) : initializeFirestore(app, { persistence: true });
   const functions = getFunctions(app, config.functionsRegion);
 
   if (config.useFirebaseEmulator) {
-    const host = emulatorHost();
+    const host = resolveEmulatorHost(Platform.OS);
 
     if (!authEmulatorConnected) {
       connectAuthEmulator(auth, `http://${host}:9099`);
@@ -83,14 +105,41 @@ export function initializeFirebase(config: ClientConfig): FirebaseServices {
     }
   }
 
-  const services: FirebaseServices = {
+  return {
     app,
     auth,
     firestore,
     functions,
     appCheck,
   };
+}
 
-  cachedServices = services;
-  return services;
+export function getFirebaseServices(): FirebaseServices {
+  if (!cachedServices) {
+    throw new Error('Firebase has not been initialized.');
+  }
+  return cachedServices;
+}
+
+export function initializeFirebase(
+  config: ClientConfig,
+  platform: ReturnType<typeof currentFirebasePlatform> = currentFirebasePlatform(),
+): Promise<FirebaseServices> {
+  if (cachedServices) {
+    return Promise.resolve(cachedServices);
+  }
+
+  if (!initializationPromise) {
+    initializationPromise = initializeFirebaseServices(config, platform)
+      .then((services) => {
+        cachedServices = services;
+        return services;
+      })
+      .catch((error: unknown) => {
+        initializationPromise = null;
+        throw error;
+      });
+  }
+
+  return initializationPromise;
 }

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { File } from 'expo-file-system';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { ChoiceChip } from '@/components/choice-chip';
 import { EmptyState } from '@/components/empty-state';
@@ -29,6 +28,7 @@ import {
   callSetNoticePinned,
   callUpdateUnitInfo,
 } from '@/lib/functions';
+import { pickCsvFile } from '@/lib/files/pick-csv';
 import { getFirebaseServices } from '@/lib/firebase';
 import { parseConstructionProgressInput } from '@/lib/ui/unit-info';
 import { useAuth } from '@/providers/auth-provider';
@@ -263,13 +263,10 @@ export default function BuilderHomeScreen() {
     setError(null);
     setMessage(null);
     try {
-      const picked = await File.pickFileAsync({
-        mimeTypes: ['text/csv', 'text/plain', 'application/vnd.ms-excel'],
-      });
-      if (!picked.canceled) {
-        const file = picked.result;
-        applyCsv(await file.text(), file.name);
-        setMessage(`Loaded ${file.name}. Review the preview before importing.`);
+      const picked = await pickCsvFile();
+      if (picked) {
+        applyCsv(picked.text, picked.name);
+        setMessage(`Loaded ${picked.name}. Review the preview before importing.`);
       }
     } catch (pickError) {
       setError(describeCallableError(pickError));

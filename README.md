@@ -6,8 +6,8 @@ Feature workflows now cover buyer CSV preview/commit from a device file picker o
 
 ## Tech stack
 
-- Expo SDK 58 with Development Builds
-- Expo Router and `expo-file-system` for device CSV file selection/reading
+- Expo SDK 58 with Development Builds and local Chrome web support
+- Expo Router, `expo-file-system` for native CSV selection, and a browser file input adapter for web CSV selection
 - React 19.3.0 and React Native 0.88.1
 - TypeScript strict mode
 - React Native Firebase 27.1.1: app, auth, firestore, functions, app-check
@@ -15,7 +15,7 @@ Feature workflows now cover buyer CSV preview/commit from a device file picker o
 - Jest and eslint-config-expo
 - Firebase Emulator Suite
 
-Expo Go is not supported because React Native Firebase uses native modules. Use an Android/iOS development build or EAS Build.
+Expo Go is not supported because React Native Firebase uses native modules. Use an Android/iOS development build, EAS Build, or the local Chrome web target.
 
 ## Prerequisites
 
@@ -48,9 +48,19 @@ Edit `.env` with your own values.
 EXPO_PUBLIC_CONSTRUCTION_PROJECT_ID=demo-project
 EXPO_PUBLIC_FUNCTIONS_REGION=us-central1
 EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true
+
+EXPO_PUBLIC_FIREBASE_API_KEY=your-web-api-key
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=your-firebase-project.firebaseapp.com
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=your-firebase-infrastructure-project-id
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=your-firebase-project.firebasestorage.app
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your-messaging-sender-id
+EXPO_PUBLIC_FIREBASE_APP_ID=your-web-app-id
+EXPO_PUBLIC_FIREBASE_DATABASE_URL=https://your-firebase-infrastructure-project-id-default-rtdb.firebaseio.com
+EXPO_PUBLIC_APP_CHECK_PROVIDER=recaptchaV3
+EXPO_PUBLIC_APP_CHECK_SITE_KEY=your-recaptcha-site-key
 ```
 
-`EXPO_PUBLIC_CONSTRUCTION_PROJECT_ID` is the residential construction project identifier. It is not the Firebase infrastructure project ID.
+`EXPO_PUBLIC_CONSTRUCTION_PROJECT_ID` is the residential construction project identifier. It is not the Firebase infrastructure project ID. `EXPO_PUBLIC_FIREBASE_PROJECT_ID` is the Firebase infrastructure project ID and must match the Firebase web app configuration. `EXPO_PUBLIC_FIREBASE_DATABASE_URL` is optional for web; when omitted, Gatehood derives the default Realtime Database URL from the infrastructure project ID because React Native Firebase requires a `databaseURL` string during initialization.
 
 `EXPO_PUBLIC_FUNCTIONS_REGION` is the Cloud Functions deployment region.
 
@@ -97,7 +107,7 @@ A real Firebase project is not connected in this repository. Native builds requi
 
 The Android package is `com.gatehood.app` and the iOS bundle identifier is `com.gatehood.app`. Your Firebase apps must use matching identifiers.
 
-App Check is initialized from `src/lib/firebase/index.ts` through a singleton Firebase module. It is initialized immediately after `getApp()` and before `getAuth()`, `getFirestore()`, or `getFunctions()` are called, and it is cached so repeated calls and retries do not initialize it again. In debug builds, the Android and Apple debug providers are selected. In release builds, Play Integrity and App Attest with DeviceCheck fallback are selected as the intended provider configuration. All callable functions in `functions/src/index.ts` use `enforceAppCheck: true`, so production calls require valid App Check tokens once the Firebase apps are registered.
+App Check is initialized from `src/lib/firebase/index.ts` through a singleton Firebase module. It is initialized immediately after the Firebase app is ready and before `getAuth()`, `getFirestore()`, or `getFunctions()` are called, and initialization is cached so repeated calls and retries do not initialize it again. On native debug builds, the Android and Apple debug providers are selected. On native release builds, Play Integrity and App Attest with DeviceCheck fallback are selected. On web development builds, Gatehood uses the Firebase web SDK debug mode; on web non-development builds, it uses `ReCaptchaV3Provider` or `ReCaptchaEnterpriseProvider` with `EXPO_PUBLIC_APP_CHECK_SITE_KEY`. All callable functions in `functions/src/index.ts` use `enforceAppCheck: true`, so production calls require valid App Check tokens once the Firebase apps are registered.
 
 ## Running locally
 
@@ -118,6 +128,15 @@ Start Metro:
 ```bash
 npm start
 ```
+
+Chrome web development:
+
+```bash
+npx firebase emulators:start
+npx expo start --web
+```
+
+Open the URL Expo reports, normally `http://localhost:8081`. Keep `EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` for local QA against the emulators. Web uses `127.0.0.1` for emulator hosts. When running against deployed callables in development mode, the browser console prints a Firebase App Check debug token. Register that token in Firebase Console by opening App Check, selecting the web app, choosing Manage debug tokens, adding the printed token, and reloading the page. Do not commit the token. Non-development web builds use the configured reCAPTCHA site key instead.
 
 Android development build:
 
@@ -146,7 +165,7 @@ Emulator ports:
 - Functions: `5001`
 - Emulator UI: `5000`
 
-The client connects Auth, Firestore, and Functions to emulators only when `EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true`. Firestore rules are least-privilege and deny all client writes to canonical data.
+The client connects Auth, Firestore, and Functions to emulators only when `EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true`. Firestore rules are least-privilege and deny all client writes to canonical data. Native builds initialize Firestore persistence; web uses the React Native Firebase Firestore web fallback and its lite SDK, so native-style persistent cache metadata is not available in Chrome. Browser Auth uses the Firebase web SDK's default browser session persistence.
 
 Backend verification:
 

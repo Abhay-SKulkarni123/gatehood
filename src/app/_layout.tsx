@@ -1,44 +1,51 @@
-import { useState } from 'react';
-import { StatusBar } from 'expo-status-bar';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorState } from '@/components/error-state';
 import { GuardLayout } from '@/components/guard-layout';
+import { LoadingIndicator } from '@/components/loading-indicator';
 import { getClientConfig } from '@/config/env';
+import {
+  initialBootstrapState,
+  runBootstrap,
+  type BootstrapState,
+} from '@/lib/boot/bootstrap';
 import { initializeFirebase } from '@/lib/firebase';
 import { AuthProvider } from '@/providers/auth-provider';
 import { MembershipProvider } from '@/providers/membership-provider';
 import { OfflineSyncProvider } from '@/providers/offline-sync-provider';
 import { colors, spacing } from '@/theme';
 
-type BootResult =
-  | { ok: true }
-  | { ok: false; message: string };
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unable to start Gatehood.';
-}
-
-function loadBoot(): BootResult {
-  try {
-    const config = getClientConfig();
-    initializeFirebase(config);
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, message: describeError(error) };
-  }
-}
-
 export default function RootLayout() {
-  const [boot, setBoot] = useState<BootResult>(loadBoot);
+  const [boot, setBoot] = useState<BootstrapState>(initialBootstrapState);
+  const attemptRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  const beginBoot = useCallback(() => {
+    const attempt = ++attemptRef.current;
+    void runBootstrap(getClientConfig, initializeFirebase).then((nextBoot) => {
+      if (mountedRef.current && attempt === attemptRef.current) {
+        setBoot(nextBoot);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    beginBoot();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [beginBoot]);
 
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <StatusBar style="light" />
-        {boot.ok ? (
+        {boot.status === 'ready' ? (
           <AuthProvider>
             <OfflineSyncProvider>
               <MembershipProvider>
@@ -53,13 +60,15 @@ export default function RootLayout() {
               </MembershipProvider>
             </OfflineSyncProvider>
           </AuthProvider>
+        ) : boot.status === 'loading' ? (
+          <LoadingIndicator label="Starting Gatehood…" />
         ) : (
           <View style={styles.errorContainer}>
             <ErrorState
               title="Gatehood cannot start"
               message={boot.message}
               retryLabel="Retry startup check"
-              onRetry={() => setBoot(loadBoot())}
+              onRetry={beginBoot}
             />
           </View>
         )}
