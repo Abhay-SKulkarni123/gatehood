@@ -56,13 +56,13 @@ EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=your-firebase-project.firebasestorage.app
 EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your-messaging-sender-id
 EXPO_PUBLIC_FIREBASE_APP_ID=your-web-app-id
 EXPO_PUBLIC_FIREBASE_DATABASE_URL=https://your-firebase-infrastructure-project-id-default-rtdb.firebaseio.com
-EXPO_PUBLIC_APP_CHECK_PROVIDER=recaptchaV3
+EXPO_PUBLIC_APP_CHECK_PROVIDER=recaptchaEnterprise
 EXPO_PUBLIC_APP_CHECK_SITE_KEY=your-recaptcha-site-key
 ```
 
 `EXPO_PUBLIC_CONSTRUCTION_PROJECT_ID` is the residential construction project identifier. It is not the Firebase infrastructure project ID. `EXPO_PUBLIC_FIREBASE_PROJECT_ID` is the Firebase infrastructure project ID and must match the Firebase web app configuration. `EXPO_PUBLIC_FIREBASE_DATABASE_URL` is optional for web; when omitted, Gatehood derives the default Realtime Database URL from the infrastructure project ID because React Native Firebase requires a `databaseURL` string during initialization.
 
-`EXPO_PUBLIC_FUNCTIONS_REGION` is the Cloud Functions deployment region. `EXPO_PUBLIC_APP_CHECK_SITE_KEY` is required for all web builds, including development: debug mode still initializes a supported reCAPTCHA provider, while the Firebase web SDK generates and prints a local debug token instead of using the provider for attestation.
+`EXPO_PUBLIC_FUNCTIONS_REGION` is the Cloud Functions deployment region. Web App Check requires the explicit `EXPO_PUBLIC_APP_CHECK_PROVIDER=recaptchaEnterprise` identifier and a Google Cloud reCAPTCHA Enterprise `EXPO_PUBLIC_APP_CHECK_SITE_KEY` for all web builds, including development: debug mode still initializes `ReCaptchaEnterpriseProvider`, while the Firebase web SDK generates and prints a local debug token instead of using the provider for attestation.
 
 `EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` points Auth, Firestore, and Functions at local emulators. Android cleartext HTTP is enabled only for local development and EAS `development` builds when this flag is exactly `true`; EAS `preview` and `production` builds remain restricted even if the flag is mistakenly set. App Check has no emulator; callable functions are declared with App Check enforcement for deployed environments.
 
@@ -107,7 +107,7 @@ A real Firebase project is not connected in this repository. Native builds requi
 
 The Android package is `com.gatehood.app` and the iOS bundle identifier is `com.gatehood.app`. Your Firebase apps must use matching identifiers.
 
-App Check is initialized from `src/lib/firebase/index.ts` through a singleton Firebase module. It is initialized immediately after the Firebase app is ready and before `getAuth()`, `getFirestore()`, or `getFunctions()` are called, and initialization is cached so repeated calls and retries do not initialize it again. On native debug builds, the Android and Apple debug providers are selected. On native release builds, Play Integrity and App Attest with DeviceCheck fallback are selected. All web builds initialize `ReCaptchaV3Provider` or `ReCaptchaEnterpriseProvider` with `EXPO_PUBLIC_APP_CHECK_SITE_KEY`; development additionally sets `FIREBASE_APPCHECK_DEBUG_TOKEN = true` before initialization so the web SDK generates and prints a local debug token while still using a supported provider. All callable functions in `functions/src/index.ts` use `enforceAppCheck: true`, so production calls require valid App Check tokens once the Firebase apps are registered.
+App Check is initialized from `src/lib/firebase/index.ts` through a singleton Firebase module. It is initialized immediately after the Firebase app is ready and before `getAuth()`, `getFirestore()`, or `getFunctions()` are called, and initialization is cached so repeated calls and retries do not initialize it again. On native debug builds, the Android and Apple debug providers are selected. On native release builds, Play Integrity and App Attest with DeviceCheck fallback are selected. All web builds initialize `ReCaptchaEnterpriseProvider` with the configured Google Cloud reCAPTCHA Enterprise site key; development additionally sets `FIREBASE_APPCHECK_DEBUG_TOKEN = true` before initialization so the web SDK generates and prints a local debug token while still using the supported Enterprise provider. All callable functions in `functions/src/index.ts` use `enforceAppCheck: true`, so production calls require valid App Check tokens once the Firebase apps are registered.
 
 ## Running locally
 
@@ -136,7 +136,7 @@ npx firebase emulators:start
 npx expo start --web
 ```
 
-Open the URL Expo reports, normally `http://localhost:8081`. Keep `EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` for local QA against the emulators. Web uses `127.0.0.1` for emulator hosts. Development web builds set `FIREBASE_APPCHECK_DEBUG_TOKEN = true` before App Check initialization and still pass the configured reCAPTCHA provider, so the browser console prints a Firebase App Check debug token. When running against deployed callables, register that token in Firebase Console by opening App Check, selecting the web app, choosing Manage debug tokens, adding the printed token, and reloading the page. Do not commit the token. Non-development web builds use reCAPTCHA attestation with the configured site key instead.
+Open the URL Expo reports, normally `http://localhost:8081`. Keep `EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` for local QA against the emulators. Web uses `127.0.0.1` for emulator hosts. Development web builds set `FIREBASE_APPCHECK_DEBUG_TOKEN = true` before App Check initialization and still pass the configured reCAPTCHA Enterprise provider, so the browser console prints a Firebase App Check debug token. When running against deployed callables, register that token in Firebase Console by opening App Check, selecting the web app, choosing Manage debug tokens, adding the printed token, and reloading the page. Do not commit the token. Non-development web builds use reCAPTCHA attestation with the configured site key instead.
 
 Android development build:
 

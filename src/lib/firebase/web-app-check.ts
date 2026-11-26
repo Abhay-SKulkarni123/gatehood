@@ -2,7 +2,6 @@ import { getApp as getWebApp } from 'firebase/app';
 import {
   initializeAppCheck as initializeWebAppCheckSdk,
   ReCaptchaEnterpriseProvider,
-  ReCaptchaV3Provider,
 } from 'firebase/app-check';
 import type { WebFirebaseConfig } from '@/config/env';
 import type { FirebaseServices } from '@/types/firebase';
@@ -28,11 +27,8 @@ export function initializeWebAppCheck(
     enableWebAppCheckDebugMode();
   }
 
-  const providerKind = resolveWebAppCheckProvider(config);
-  const provider =
-    providerKind === 'recaptchaEnterprise'
-      ? new ReCaptchaEnterpriseProvider(config.appCheckSiteKey)
-      : new ReCaptchaV3Provider(config.appCheckSiteKey);
+  resolveWebAppCheckProvider(config);
+  const provider = new ReCaptchaEnterpriseProvider(config.appCheckSiteKey);
 
   const appCheck = initializeWebAppCheckSdk(getWebApp(appName), {
     provider,

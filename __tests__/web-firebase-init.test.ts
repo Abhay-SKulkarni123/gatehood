@@ -67,7 +67,7 @@ function createConfig() {
       messagingSenderId: '1234567890',
       appId: '1:1234567890:web:abc',
       databaseUrl: 'https://infra-project-default-rtdb.firebaseio.com',
-      appCheckProvider: 'recaptchaV3' as const,
+      appCheckProvider: 'recaptchaEnterprise' as const,
       appCheckSiteKey: 'site-key',
     },
   };

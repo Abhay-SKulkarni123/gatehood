@@ -9,11 +9,7 @@ jest.mock('firebase/app-check', () => ({
     siteKey,
     debugTokenAtProviderCreation: (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN,
   })),
-  ReCaptchaV3Provider: jest.fn().mockImplementation((siteKey) => ({
-    kind: 'v3',
-    siteKey,
-    debugTokenAtProviderCreation: (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN,
-  })),
+  ReCaptchaV3Provider: jest.fn().mockImplementation((siteKey) => ({ kind: 'v3', siteKey })),
   initializeAppCheck: jest.fn((app, options) => ({
     kind: 'app-check',
     app,
@@ -29,10 +25,7 @@ type WebAppCheckGlobal = typeof globalThis & {
   FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean | string;
 };
 
-function config(overrides: Partial<{
-  appCheckProvider: 'recaptchaV3' | 'recaptchaEnterprise';
-  appCheckSiteKey: string | null;
-}> = {}) {
+function config(overrides: Partial<{ appCheckSiteKey: string | null }> = {}) {
   return {
     apiKey: 'web-api-key',
     authDomain: 'infra-project.firebaseapp.com',
@@ -41,13 +34,13 @@ function config(overrides: Partial<{
     messagingSenderId: '1234567890',
     appId: '1:1234567890:web:abc',
     databaseUrl: 'https://infra-project-default-rtdb.firebaseio.com',
-    appCheckProvider: overrides.appCheckProvider ?? 'recaptchaV3',
+    appCheckProvider: 'recaptchaEnterprise' as const,
     appCheckSiteKey:
       'appCheckSiteKey' in overrides ? overrides.appCheckSiteKey : 'site-key',
   };
 }
 
-describe('web App Check provider selection', () => {
+describe('web App Check Enterprise provider', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     delete (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN;
@@ -57,42 +50,23 @@ describe('web App Check provider selection', () => {
     delete (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN;
   });
 
-  it('enables debug mode before initializing a supported reCAPTCHA V3 provider', () => {
+  it('sets debug-token mode before initializing the Enterprise provider in development', () => {
     const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
 
     initializeWebAppCheck('[DEFAULT]', config(), true);
-
-    const provider = appCheckSdk.ReCaptchaV3Provider.mock.results[0].value;
-    const appCheck = appCheckSdk.initializeAppCheck.mock.results[0].value;
-
-    expect(provider.debugTokenAtProviderCreation).toBe(true);
-    expect(appCheck.debugTokenAtInitialization).toBe(true);
-    expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
-    expect(appCheckSdk.ReCaptchaV3Provider).toHaveBeenCalledWith('site-key');
-    expect(appCheckSdk.ReCaptchaEnterpriseProvider).not.toHaveBeenCalled();
-    expect(appCheckSdk.initializeAppCheck).toHaveBeenCalledWith(webAppModule.getApp(), {
-      provider,
-      isTokenAutoRefreshEnabled: true,
-    });
-  });
-
-  it('uses reCAPTCHA Enterprise with debug mode in development when configured', () => {
-    const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
-
-    initializeWebAppCheck(
-      '[DEFAULT]',
-      config({ appCheckProvider: 'recaptchaEnterprise' }),
-      true,
-    );
 
     const provider = appCheckSdk.ReCaptchaEnterpriseProvider.mock.results[0].value;
     const appCheck = appCheckSdk.initializeAppCheck.mock.results[0].value;
 
     expect(provider.debugTokenAtProviderCreation).toBe(true);
     expect(appCheck.debugTokenAtInitialization).toBe(true);
-    expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
-    expect(appCheckSdk.ReCaptchaV3Provider).not.toHaveBeenCalled();
     expect(appCheckSdk.ReCaptchaEnterpriseProvider).toHaveBeenCalledWith('site-key');
+    expect(appCheckSdk.ReCaptchaV3Provider).not.toHaveBeenCalled();
+    expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
+    expect(appCheckSdk.initializeAppCheck).toHaveBeenCalledWith(webAppModule.getApp(), {
+      provider,
+      isTokenAutoRefreshEnabled: true,
+    });
   });
 
   it('preserves an explicitly registered debug token', () => {
@@ -105,37 +79,23 @@ describe('web App Check provider selection', () => {
     expect(appCheckSdk.initializeAppCheck.mock.results[0].value.debugTokenAtInitialization).toBe(
       'registered-token',
     );
+    expect(appCheckSdk.ReCaptchaV3Provider).not.toHaveBeenCalled();
     expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
   });
 
-  it('uses reCAPTCHA V3 without debug mode in production', () => {
+  it('uses the Enterprise provider without debug mode in production', () => {
     const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
 
-    initializeWebAppCheck('[DEFAULT]', config({ appCheckProvider: 'recaptchaV3' }), false);
-
-    expect(appCheckSdk.ReCaptchaV3Provider).toHaveBeenCalledWith('site-key');
-    expect(appCheckSdk.ReCaptchaEnterpriseProvider).not.toHaveBeenCalled();
-    expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
-    expect(appCheckSdk.initializeAppCheck.mock.results[0].value.debugTokenAtInitialization).toBeUndefined();
-    expect((globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN).toBeUndefined();
-  });
-
-  it('uses reCAPTCHA Enterprise without debug mode in production when configured', () => {
-    const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
-
-    initializeWebAppCheck(
-      '[DEFAULT]',
-      config({ appCheckProvider: 'recaptchaEnterprise' }),
-      false,
-    );
+    initializeWebAppCheck('[DEFAULT]', config(), false);
 
     expect(appCheckSdk.ReCaptchaEnterpriseProvider).toHaveBeenCalledWith('site-key');
     expect(appCheckSdk.ReCaptchaV3Provider).not.toHaveBeenCalled();
     expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
     expect(appCheckSdk.initializeAppCheck.mock.results[0].value.debugTokenAtInitialization).toBeUndefined();
+    expect((globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN).toBeUndefined();
   });
 
-  it('requires a site key in development and production', () => {
+  it('requires an Enterprise site key in development and production', () => {
     const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
 
     expect(() =>

@@ -13,7 +13,7 @@ const validWebEnv = {
   EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET: 'infra-project.firebasestorage.app',
   EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: '1234567890',
   EXPO_PUBLIC_FIREBASE_APP_ID: '1:1234567890:web:abc',
-  EXPO_PUBLIC_APP_CHECK_PROVIDER: 'recaptchaV3',
+  EXPO_PUBLIC_APP_CHECK_PROVIDER: 'recaptchaEnterprise',
   EXPO_PUBLIC_APP_CHECK_SITE_KEY: 'site-key',
 };
 
@@ -62,7 +62,7 @@ describe('parseClientConfig', () => {
       messagingSenderId: '1234567890',
       appId: '1:1234567890:web:abc',
       databaseUrl: 'https://infra-project-default-rtdb.firebaseio.com',
-      appCheckProvider: 'recaptchaV3',
+      appCheckProvider: 'recaptchaEnterprise',
       appCheckSiteKey: 'site-key',
     });
   });
@@ -73,7 +73,7 @@ describe('parseClientConfig', () => {
     );
   });
 
-  it('requires a web App Check site key for the supported reCAPTCHA provider', () => {
+  it('requires a Google Cloud reCAPTCHA Enterprise site key', () => {
     const withoutSiteKey: Record<string, string> = { ...validWebEnv };
     delete withoutSiteKey.EXPO_PUBLIC_APP_CHECK_SITE_KEY;
 
@@ -82,12 +82,24 @@ describe('parseClientConfig', () => {
     );
   });
 
-  it('rejects an invalid web App Check provider', () => {
+  it('requires the explicit reCAPTCHA Enterprise provider identifier', () => {
+    const withoutProvider: Record<string, string> = { ...validWebEnv };
+    delete withoutProvider.EXPO_PUBLIC_APP_CHECK_PROVIDER;
+
+    expect(() => parseClientConfig(withoutProvider, 'web')).toThrow(
+      'EXPO_PUBLIC_APP_CHECK_PROVIDER must be recaptchaEnterprise for web.',
+    );
+    expect(() =>
+      parseClientConfig(
+        { ...validWebEnv, EXPO_PUBLIC_APP_CHECK_PROVIDER: 'recaptchaV3' },
+        'web',
+      ),
+    ).toThrow('EXPO_PUBLIC_APP_CHECK_PROVIDER must be recaptchaEnterprise for web.');
     expect(() =>
       parseClientConfig(
         { ...validWebEnv, EXPO_PUBLIC_APP_CHECK_PROVIDER: 'debug' },
         'web',
       ),
-    ).toThrow('EXPO_PUBLIC_APP_CHECK_PROVIDER must be recaptchaV3 or recaptchaEnterprise.');
+    ).toThrow('EXPO_PUBLIC_APP_CHECK_PROVIDER must be recaptchaEnterprise for web.');
   });
 });

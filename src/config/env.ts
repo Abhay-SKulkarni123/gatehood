@@ -2,9 +2,9 @@ import { Platform } from 'react-native';
 import { isSlug } from '@/utils/identifiers';
 
 const FUNCTIONS_REGION_PATTERN = /^[a-z0-9-]+$/;
-const APP_CHECK_PROVIDERS = ['recaptchaV3', 'recaptchaEnterprise'] as const;
+const WEB_APP_CHECK_PROVIDER = 'recaptchaEnterprise';
 
-export type AppCheckWebProvider = (typeof APP_CHECK_PROVIDERS)[number];
+export type AppCheckWebProvider = typeof WEB_APP_CHECK_PROVIDER;
 
 export type WebFirebaseConfig = {
   apiKey: string;
@@ -50,8 +50,7 @@ function parseWebFirebaseConfig(
   const messagingSenderId = readValue(env, 'EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID');
   const appId = readValue(env, 'EXPO_PUBLIC_FIREBASE_APP_ID');
   const configuredDatabaseUrl = readValue(env, 'EXPO_PUBLIC_FIREBASE_DATABASE_URL');
-  const configuredAppCheckProvider = readValue(env, 'EXPO_PUBLIC_APP_CHECK_PROVIDER');
-  const appCheckProvider = configuredAppCheckProvider || 'recaptchaV3';
+  const appCheckProvider = readValue(env, 'EXPO_PUBLIC_APP_CHECK_PROVIDER');
   const appCheckSiteKey = readValue(env, 'EXPO_PUBLIC_APP_CHECK_SITE_KEY');
 
   const hasWebConfig = [
@@ -61,7 +60,7 @@ function parseWebFirebaseConfig(
     storageBucket,
     messagingSenderId,
     appId,
-    configuredAppCheckProvider,
+    appCheckProvider,
     appCheckSiteKey,
     configuredDatabaseUrl,
   ].some(Boolean);
@@ -84,8 +83,8 @@ function parseWebFirebaseConfig(
   if (!appCheckSiteKey) {
     issues.push('EXPO_PUBLIC_APP_CHECK_SITE_KEY is required for web.');
   }
-  if (!APP_CHECK_PROVIDERS.includes(appCheckProvider as AppCheckWebProvider)) {
-    issues.push('EXPO_PUBLIC_APP_CHECK_PROVIDER must be recaptchaV3 or recaptchaEnterprise.');
+  if (appCheckProvider !== WEB_APP_CHECK_PROVIDER) {
+    issues.push('EXPO_PUBLIC_APP_CHECK_PROVIDER must be recaptchaEnterprise for web.');
   }
 
   const databaseUrl =
