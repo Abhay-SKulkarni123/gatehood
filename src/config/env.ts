@@ -15,7 +15,7 @@ export type WebFirebaseConfig = {
   appId: string;
   databaseUrl: string;
   appCheckProvider: AppCheckWebProvider;
-  appCheckSiteKey: string | null;
+  appCheckSiteKey: string;
 };
 
 export type ClientConfig = {
@@ -52,7 +52,7 @@ function parseWebFirebaseConfig(
   const configuredDatabaseUrl = readValue(env, 'EXPO_PUBLIC_FIREBASE_DATABASE_URL');
   const configuredAppCheckProvider = readValue(env, 'EXPO_PUBLIC_APP_CHECK_PROVIDER');
   const appCheckProvider = configuredAppCheckProvider || 'recaptchaV3';
-  const appCheckSiteKey = readValue(env, 'EXPO_PUBLIC_APP_CHECK_SITE_KEY') || null;
+  const appCheckSiteKey = readValue(env, 'EXPO_PUBLIC_APP_CHECK_SITE_KEY');
 
   const hasWebConfig = [
     apiKey,
@@ -81,6 +81,9 @@ function parseWebFirebaseConfig(
     issues.push('EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID is required for web.');
   }
   if (!appId) issues.push('EXPO_PUBLIC_FIREBASE_APP_ID is required for web.');
+  if (!appCheckSiteKey) {
+    issues.push('EXPO_PUBLIC_APP_CHECK_SITE_KEY is required for web.');
+  }
   if (!APP_CHECK_PROVIDERS.includes(appCheckProvider as AppCheckWebProvider)) {
     issues.push('EXPO_PUBLIC_APP_CHECK_PROVIDER must be recaptchaV3 or recaptchaEnterprise.');
   }

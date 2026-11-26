@@ -73,6 +73,15 @@ describe('parseClientConfig', () => {
     );
   });
 
+  it('requires a web App Check site key for the supported reCAPTCHA provider', () => {
+    const withoutSiteKey: Record<string, string> = { ...validWebEnv };
+    delete withoutSiteKey.EXPO_PUBLIC_APP_CHECK_SITE_KEY;
+
+    expect(() => parseClientConfig(withoutSiteKey, 'web')).toThrow(
+      'EXPO_PUBLIC_APP_CHECK_SITE_KEY is required for web.',
+    );
+  });
+
   it('rejects an invalid web App Check provider', () => {
     expect(() =>
       parseClientConfig(

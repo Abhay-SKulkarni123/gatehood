@@ -23,18 +23,9 @@ export function toWebFirebaseOptions(config: WebFirebaseConfig) {
   };
 }
 
-export type WebAppCheckProviderKind = 'debug' | AppCheckWebProvider;
-
-export function resolveWebAppCheckProvider(
-  config: WebFirebaseConfig,
-  isDevelopment: boolean,
-): WebAppCheckProviderKind {
-  if (isDevelopment) {
-    return 'debug';
-  }
-
+export function resolveWebAppCheckProvider(config: WebFirebaseConfig): AppCheckWebProvider {
   if (!config.appCheckSiteKey) {
-    throw new Error('EXPO_PUBLIC_APP_CHECK_SITE_KEY is required for non-development web builds.');
+    throw new Error('EXPO_PUBLIC_APP_CHECK_SITE_KEY is required for web.');
   }
 
   return config.appCheckProvider;

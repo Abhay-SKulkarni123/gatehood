@@ -7,9 +7,19 @@ jest.mock('firebase/app-check', () => ({
   ReCaptchaEnterpriseProvider: jest.fn().mockImplementation((siteKey) => ({
     kind: 'enterprise',
     siteKey,
+    debugTokenAtProviderCreation: (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN,
   })),
-  ReCaptchaV3Provider: jest.fn().mockImplementation((siteKey) => ({ kind: 'v3', siteKey })),
-  initializeAppCheck: jest.fn((app, options) => ({ kind: 'app-check', app, options })),
+  ReCaptchaV3Provider: jest.fn().mockImplementation((siteKey) => ({
+    kind: 'v3',
+    siteKey,
+    debugTokenAtProviderCreation: (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN,
+  })),
+  initializeAppCheck: jest.fn((app, options) => ({
+    kind: 'app-check',
+    app,
+    options,
+    debugTokenAtInitialization: (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN,
+  })),
 }));
 
 const webAppModule = jest.requireMock('firebase/app');
@@ -47,22 +57,58 @@ describe('web App Check provider selection', () => {
     delete (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN;
   });
 
-  it('uses debug mode in development with a custom provider', () => {
+  it('enables debug mode before initializing a supported reCAPTCHA V3 provider', () => {
     const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
 
     initializeWebAppCheck('[DEFAULT]', config(), true);
 
-    expect((globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN).toBe(true);
-    expect(appCheckSdk.CustomProvider).toHaveBeenCalledTimes(1);
-    expect(appCheckSdk.ReCaptchaV3Provider).not.toHaveBeenCalled();
+    const provider = appCheckSdk.ReCaptchaV3Provider.mock.results[0].value;
+    const appCheck = appCheckSdk.initializeAppCheck.mock.results[0].value;
+
+    expect(provider.debugTokenAtProviderCreation).toBe(true);
+    expect(appCheck.debugTokenAtInitialization).toBe(true);
+    expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
+    expect(appCheckSdk.ReCaptchaV3Provider).toHaveBeenCalledWith('site-key');
     expect(appCheckSdk.ReCaptchaEnterpriseProvider).not.toHaveBeenCalled();
-    expect(appCheckSdk.initializeAppCheck).toHaveBeenCalledWith(
-      webAppModule.getApp.mock.results[0].value,
-      expect.objectContaining({ isTokenAutoRefreshEnabled: true }),
-    );
+    expect(appCheckSdk.initializeAppCheck).toHaveBeenCalledWith(webAppModule.getApp(), {
+      provider,
+      isTokenAutoRefreshEnabled: true,
+    });
   });
 
-  it('uses reCAPTCHA V3 in production', () => {
+  it('uses reCAPTCHA Enterprise with debug mode in development when configured', () => {
+    const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
+
+    initializeWebAppCheck(
+      '[DEFAULT]',
+      config({ appCheckProvider: 'recaptchaEnterprise' }),
+      true,
+    );
+
+    const provider = appCheckSdk.ReCaptchaEnterpriseProvider.mock.results[0].value;
+    const appCheck = appCheckSdk.initializeAppCheck.mock.results[0].value;
+
+    expect(provider.debugTokenAtProviderCreation).toBe(true);
+    expect(appCheck.debugTokenAtInitialization).toBe(true);
+    expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
+    expect(appCheckSdk.ReCaptchaV3Provider).not.toHaveBeenCalled();
+    expect(appCheckSdk.ReCaptchaEnterpriseProvider).toHaveBeenCalledWith('site-key');
+  });
+
+  it('preserves an explicitly registered debug token', () => {
+    const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
+    (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN = 'registered-token';
+
+    initializeWebAppCheck('[DEFAULT]', config(), true);
+
+    expect((globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN).toBe('registered-token');
+    expect(appCheckSdk.initializeAppCheck.mock.results[0].value.debugTokenAtInitialization).toBe(
+      'registered-token',
+    );
+    expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
+  });
+
+  it('uses reCAPTCHA V3 without debug mode in production', () => {
     const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
 
     initializeWebAppCheck('[DEFAULT]', config({ appCheckProvider: 'recaptchaV3' }), false);
@@ -70,10 +116,11 @@ describe('web App Check provider selection', () => {
     expect(appCheckSdk.ReCaptchaV3Provider).toHaveBeenCalledWith('site-key');
     expect(appCheckSdk.ReCaptchaEnterpriseProvider).not.toHaveBeenCalled();
     expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
+    expect(appCheckSdk.initializeAppCheck.mock.results[0].value.debugTokenAtInitialization).toBeUndefined();
     expect((globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN).toBeUndefined();
   });
 
-  it('uses reCAPTCHA Enterprise in production when configured', () => {
+  it('uses reCAPTCHA Enterprise without debug mode in production when configured', () => {
     const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
 
     initializeWebAppCheck(
@@ -84,13 +131,19 @@ describe('web App Check provider selection', () => {
 
     expect(appCheckSdk.ReCaptchaEnterpriseProvider).toHaveBeenCalledWith('site-key');
     expect(appCheckSdk.ReCaptchaV3Provider).not.toHaveBeenCalled();
+    expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
+    expect(appCheckSdk.initializeAppCheck.mock.results[0].value.debugTokenAtInitialization).toBeUndefined();
   });
 
-  it('requires a site key outside development', () => {
+  it('requires a site key in development and production', () => {
     const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
 
     expect(() =>
+      initializeWebAppCheck('[DEFAULT]', config({ appCheckSiteKey: null }), true),
+    ).toThrow('EXPO_PUBLIC_APP_CHECK_SITE_KEY is required for web.');
+    expect(() =>
       initializeWebAppCheck('[DEFAULT]', config({ appCheckSiteKey: null }), false),
-    ).toThrow('EXPO_PUBLIC_APP_CHECK_SITE_KEY is required for non-development web builds.');
+    ).toThrow('EXPO_PUBLIC_APP_CHECK_SITE_KEY is required for web.');
+    expect(appCheckSdk.initializeAppCheck).not.toHaveBeenCalled();
   });
 });

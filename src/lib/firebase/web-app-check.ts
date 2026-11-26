@@ -1,6 +1,5 @@
 import { getApp as getWebApp } from 'firebase/app';
 import {
-  CustomProvider as WebCustomProvider,
   initializeAppCheck as initializeWebAppCheckSdk,
   ReCaptchaEnterpriseProvider,
   ReCaptchaV3Provider,
@@ -13,17 +12,11 @@ type WebAppCheckGlobal = typeof globalThis & {
   FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean | string;
 };
 
-function createDebugProvider(): WebCustomProvider {
+function enableWebAppCheckDebugMode(): void {
   const scope = globalThis as WebAppCheckGlobal;
-  scope.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
-
-  return new WebCustomProvider({
-    async getToken() {
-      throw new Error(
-        'Web App Check debug token is not registered. Register the token printed in the browser console in Firebase Console.',
-      );
-    },
-  });
+  if (typeof scope.FIREBASE_APPCHECK_DEBUG_TOKEN !== 'string') {
+    scope.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+  }
 }
 
 export function initializeWebAppCheck(
@@ -31,14 +24,15 @@ export function initializeWebAppCheck(
   config: WebFirebaseConfig,
   isDevelopment: boolean,
 ): FirebaseServices['appCheck'] {
-  const providerKind = resolveWebAppCheckProvider(config, isDevelopment);
+  if (isDevelopment) {
+    enableWebAppCheckDebugMode();
+  }
 
+  const providerKind = resolveWebAppCheckProvider(config);
   const provider =
-    providerKind === 'debug'
-      ? createDebugProvider()
-      : providerKind === 'recaptchaEnterprise'
-        ? new ReCaptchaEnterpriseProvider(config.appCheckSiteKey as string)
-        : new ReCaptchaV3Provider(config.appCheckSiteKey as string);
+    providerKind === 'recaptchaEnterprise'
+      ? new ReCaptchaEnterpriseProvider(config.appCheckSiteKey)
+      : new ReCaptchaV3Provider(config.appCheckSiteKey);
 
   const appCheck = initializeWebAppCheckSdk(getWebApp(appName), {
     provider,

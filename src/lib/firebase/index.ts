@@ -20,6 +20,7 @@ import {
   toWebFirebaseOptions,
 } from './platform';
 import { initializeWebAppCheck } from './web-app-check';
+import { connectWebFirestoreEmulator } from './web-firestore';
 
 let cachedAppCheck: FirebaseServices['appCheck'] | null = null;
 let cachedServices: FirebaseServices | null = null;
@@ -61,7 +62,7 @@ async function ensureFirebaseApp(
       throw new Error('Firebase web configuration is required when running on web.');
     }
 
-    resolveWebAppCheckProvider(webConfig, __DEV__ || config.useFirebaseEmulator);
+    resolveWebAppCheckProvider(webConfig);
 
     if (getApps().length === 0) {
       await initializeApp(toWebFirebaseOptions(webConfig));
@@ -96,6 +97,9 @@ async function initializeFirebaseServices(
 
     if (!firestoreEmulatorConnected) {
       connectFirestoreEmulator(firestore, host, 8080);
+      if (platform === 'web') {
+        connectWebFirestoreEmulator(host, 8080);
+      }
       firestoreEmulatorConnected = true;
     }
 
