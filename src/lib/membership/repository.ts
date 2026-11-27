@@ -45,14 +45,29 @@ function errorCode(error: unknown): string {
   if (typeof error !== 'object' || error === null) {
     return '';
   }
-  const code = (error as { code?: unknown }).code;
-  return typeof code === 'string' ? code.toLowerCase() : '';
+  const rawCode = (error as { code?: unknown }).code;
+  if (typeof rawCode !== 'string') {
+    return '';
+  }
+  const bracketed = rawCode.match(/\[code=([^\]]+)\]/);
+  const normalized = (bracketed?.[1] ?? rawCode).trim().toLowerCase();
+  const parts = normalized.split(/[\s/]+/);
+  return parts[parts.length - 1] ?? '';
 }
 
 function membershipErrorState(error: unknown): MembershipState {
   const code = errorCode(error);
   if (code === 'permission-denied') {
     return { status: 'missing' };
+  }
+  if (
+    ['fetch-status-error', 'token-refresh-failed', 'token-expired', 'invalid-token'].includes(code)
+  ) {
+    return {
+      status: 'error',
+      message: 'We could not verify this app. Check your connection and try again.',
+      retryable: true,
+    };
   }
   if (
     ['unavailable', 'deadline-exceeded', 'network-request-failed', 'internal'].includes(code) ||

@@ -138,6 +138,17 @@ npx expo start --web
 
 Open the URL Expo reports, normally `http://localhost:8081`. Keep `EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true` for local QA against the emulators. Web uses `127.0.0.1` for emulator hosts. Development web builds set `FIREBASE_APPCHECK_DEBUG_TOKEN = true` before App Check initialization and still pass the configured reCAPTCHA Enterprise provider, so the browser console prints a Firebase App Check debug token. When running against deployed callables, register that token in Firebase Console by opening App Check, selecting the web app, choosing Manage debug tokens, adding the printed token, and reloading the page. Do not commit the token. Non-development web builds use reCAPTCHA attestation with the configured site key instead.
 
+Seed local builder and buyer users plus the `demo-project` membership records from a separate terminal while the emulators are running:
+
+```powershell
+$env:GCLOUD_PROJECT = '<emulator project id>'
+$env:FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+$env:FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099'
+npm run seed:emulator
+```
+
+The seed command refuses non-local emulator hosts and writes only to the emulator. Sign in with `builder@gatehood.test` or `buyer@gatehood.test` and the locally documented test password. In Firebase Console, register the browser debug token for App Check if you want to exercise deployed callables; the Functions emulator does not enforce App Check.
+
 Android development build:
 
 ```bash

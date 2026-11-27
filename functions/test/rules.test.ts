@@ -102,6 +102,11 @@ describe('Firestore security rules', () => {
     await assertFails(buyerDb.doc(paths.member(PROJECT_ID, BUYER_TWO_UID)).get());
   });
 
+  it('denies an unprovisioned user reading their own membership', async () => {
+    const unprovisionedDb = testEnv.authenticatedContext('unprovisioned-uid').firestore();
+    await assertFails(unprovisionedDb.doc(paths.member(PROJECT_ID, 'unprovisioned-uid')).get());
+  });
+
   it('denies unauthenticated reads', async () => {
     const anonymousDb = testEnv.unauthenticatedContext().firestore();
     await assertFails(anonymousDb.doc(paths.project(PROJECT_ID)).get());

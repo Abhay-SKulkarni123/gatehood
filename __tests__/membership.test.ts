@@ -81,6 +81,22 @@ test('permission denied on own membership is treated as missing, not a network f
   await expect(loadMembership(firestore, projectId, uid)).resolves.toEqual({ status: 'missing' });
 });
 
+test('namespaced firestore permission denied is treated as missing', async () => {
+  mockGetDoc.mockRejectedValue({ code: 'firestore/permission-denied' });
+
+  await expect(loadMembership(firestore, projectId, uid)).resolves.toEqual({ status: 'missing' });
+});
+
+test('App Check token failures are retryable infrastructure errors', async () => {
+  mockGetDoc.mockRejectedValue({ code: 'appCheck/fetch-status-error' });
+
+  await expect(loadMembership(firestore, projectId, uid)).resolves.toEqual({
+    status: 'error',
+    message: 'We could not verify this app. Check your connection and try again.',
+    retryable: true,
+  });
+});
+
 test('unavailable membership lookup is a retryable error and never proves missing', async () => {
   mockGetDoc.mockRejectedValue({ code: 'unavailable' });
 

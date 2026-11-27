@@ -117,6 +117,7 @@ describe('platform-aware Firebase initialization', () => {
     expect(appCheckOrder).toBeLessThan(authModule.getAuth.mock.invocationCallOrder[0]);
     expect(appCheckOrder).toBeLessThan(firestoreModule.getFirestore.mock.invocationCallOrder[0]);
     expect(appCheckOrder).toBeLessThan(functionsModule.getFunctions.mock.invocationCallOrder[0]);
+    expect(functionsModule.getFunctions).toHaveBeenCalledWith(app, 'us-central1');
     expect(firestoreModule.getFirestore).toHaveBeenCalledWith(app);
     expect(firestoreModule.initializeFirestore).not.toHaveBeenCalled();
     expect(services.appCheck).toEqual({ kind: 'web-app-check' });
