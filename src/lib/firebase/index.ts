@@ -81,7 +81,7 @@ async function initializeFirebaseServices(
   const useDebugWebAppCheck = __DEV__ || config.useFirebaseEmulator;
   const appCheck =
     platform === 'web' && config.webFirebase
-      ? initializeWebAppCheck(app.name, config.webFirebase, useDebugWebAppCheck)
+      ? await initializeWebAppCheck(app.name, config.webFirebase, useDebugWebAppCheck)
       : getNativeAppCheck(app);
   let auth: FirebaseServices['auth'];
   if (platform === 'web') {

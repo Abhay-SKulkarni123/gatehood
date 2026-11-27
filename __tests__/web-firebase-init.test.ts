@@ -33,7 +33,7 @@ jest.mock('@/lib/firebase/web-auth', () => ({
 }));
 
 jest.mock('@/lib/firebase/web-app-check', () => ({
-  initializeWebAppCheck: jest.fn(() => ({ kind: 'web-app-check' })),
+  initializeWebAppCheck: jest.fn(async () => ({ kind: 'web-app-check' })),
 }));
 
 jest.mock('@/lib/firebase/web-firestore', () => ({
@@ -90,9 +90,13 @@ function resetMocks() {
   functionsModule.getFunctions.mockReturnValue({ kind: 'functions' });
   webAuthModule.getWebAuth.mockReturnValue({ kind: 'web-auth' });
   webAuthModule.connectWebAuthEmulator.mockImplementation(() => undefined);
-  webAppCheckModule.initializeWebAppCheck.mockReturnValue({ kind: 'web-app-check' });
+  webAppCheckModule.initializeWebAppCheck.mockResolvedValue({ kind: 'web-app-check' });
   webFirestoreModule.connectWebFirestoreEmulator.mockImplementation(() => undefined);
   webFirestoreModule.getWebFirestore.mockReturnValue({ kind: 'full-web-firestore' });
+}
+
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe('platform-aware Firebase initialization', () => {
@@ -129,6 +133,34 @@ describe('platform-aware Firebase initialization', () => {
     expect(firestoreModule.getFirestore).toHaveBeenCalledWith(app);
     expect(firestoreModule.initializeFirestore).not.toHaveBeenCalled();
     expect(services.appCheck).toEqual({ kind: 'web-app-check' });
+  });
+
+  it('waits for web App Check token acquisition before creating callable services', async () => {
+    const firebase = loadFirebaseModule();
+    const config = createConfig();
+    let releaseAppCheck!: (services: { kind: string }) => void;
+
+    webAppCheckModule.initializeWebAppCheck.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseAppCheck = (services) => resolve(services);
+        }),
+    );
+
+    const initialization = firebase.initializeFirebase(config, 'web');
+    await flushMicrotasks();
+
+    expect(webAppCheckModule.initializeWebAppCheck).toHaveBeenCalledTimes(1);
+    expect(webAuthModule.getWebAuth).not.toHaveBeenCalled();
+    expect(firestoreModule.getFirestore).not.toHaveBeenCalled();
+    expect(functionsModule.getFunctions).not.toHaveBeenCalled();
+
+    releaseAppCheck({ kind: 'web-app-check' });
+    await initialization;
+
+    expect(webAuthModule.getWebAuth).toHaveBeenCalledTimes(1);
+    expect(firestoreModule.getFirestore).toHaveBeenCalledTimes(1);
+    expect(functionsModule.getFunctions).toHaveBeenCalledTimes(1);
   });
 
   it('preserves native initialization', async () => {

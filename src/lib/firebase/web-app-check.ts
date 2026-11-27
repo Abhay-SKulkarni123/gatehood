@@ -1,7 +1,9 @@
 import { getApp as getWebApp } from 'firebase/app';
 import {
+  getToken as getWebAppCheckToken,
   initializeAppCheck as initializeWebAppCheckSdk,
   ReCaptchaEnterpriseProvider,
+  type AppCheck as WebAppCheck,
 } from 'firebase/app-check';
 import type { WebFirebaseConfig } from '@/config/env';
 import type { FirebaseServices } from '@/types/firebase';
@@ -18,11 +20,11 @@ function enableWebAppCheckDebugMode(): void {
   }
 }
 
-export function initializeWebAppCheck(
+export async function initializeWebAppCheck(
   appName: string,
   config: WebFirebaseConfig,
   isDevelopment: boolean,
-): FirebaseServices['appCheck'] {
+): Promise<FirebaseServices['appCheck']> {
   if (isDevelopment) {
     enableWebAppCheckDebugMode();
   }
@@ -34,6 +36,14 @@ export function initializeWebAppCheck(
     provider,
     isTokenAutoRefreshEnabled: true,
   });
+
+  try {
+    await getWebAppCheckToken(appCheck as WebAppCheck, isDevelopment);
+  } catch {
+    throw new Error(
+      'Firebase App Check could not obtain a web token. Verify the App Check registration, reCAPTCHA Enterprise configuration, and local debug token, then reload.',
+    );
+  }
 
   return appCheck as unknown as FirebaseServices['appCheck'];
 }

@@ -28,5 +28,9 @@ export function resolveWebAppCheckProvider(config: WebFirebaseConfig): AppCheckW
     throw new Error('EXPO_PUBLIC_APP_CHECK_SITE_KEY is required for web.');
   }
 
+  if (config.appCheckProvider !== 'recaptchaEnterprise') {
+    throw new Error('EXPO_PUBLIC_APP_CHECK_PROVIDER must be recaptchaEnterprise for web.');
+  }
+
   return config.appCheckProvider;
 }
