@@ -104,13 +104,18 @@ test('Firebase auth errors are normalized for the UI', async () => {
   );
 });
 
-test('auth subscription registers once and returns unsubscribe', () => {
+test('native auth subscription forwards the user and returns unsubscribe', () => {
   const onUserChanged = jest.fn();
   const unsubscribe = jest.fn();
+  const user = { uid: 'uid-1' } as User;
   mockOnAuthStateChanged.mockReturnValue(unsubscribe);
 
   expect(subscribeToAuthState(auth, onUserChanged)).toBe(unsubscribe);
-  expect(mockOnAuthStateChanged).toHaveBeenCalledWith(auth, onUserChanged);
+  expect(mockOnAuthStateChanged).toHaveBeenCalledWith(auth, expect.any(Function));
+
+  const listener = mockOnAuthStateChanged.mock.calls[0][1] as (user: User | null) => void;
+  listener(user);
+  expect(onUserChanged).toHaveBeenCalledWith(user);
 });
 
 test('auth reducer tracks initialization, changes, actions, and sign-out', () => {

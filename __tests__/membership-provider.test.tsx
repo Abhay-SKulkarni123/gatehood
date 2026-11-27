@@ -190,6 +190,19 @@ test('initial signed-in lookup is bound to the current auth session', async () =
   expect(observed.decision).toBe('allow');
 });
 
+test('a restored web auth session resolves builder membership after reload', async () => {
+  mockLoadMembership.mockResolvedValue(readyMembership('uid-1', 'builder'));
+  await mountProviders();
+
+  await emitAuth(user('uid-1'));
+
+  expect(mockLoadMembership).toHaveBeenCalledWith(firestore, 'project-1', 'uid-1');
+  expect(observed.sessionId).toBe(1);
+  expect(observed.uid).toBe('uid-1');
+  expect(observed.membershipStatus).toBe('ready');
+  expect(observed.decision).toBe('allow');
+});
+
 test('sign-out invalidates the previous membership result', async () => {
   mockLoadMembership.mockResolvedValue(readyMembership('uid-1', 'builder'));
   await mountProviders();

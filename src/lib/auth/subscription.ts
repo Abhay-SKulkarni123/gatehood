@@ -1,9 +1,9 @@
-import { onAuthStateChanged } from '@react-native-firebase/auth';
-import type { Auth, User } from '@react-native-firebase/auth';
+import type { AppAuth, AppUser } from '@/types/firebase';
+import { authAdapter } from './platform';
 
 export function subscribeToAuthState(
-  auth: Auth,
-  onUserChanged: (user: User | null) => void,
+  auth: AppAuth,
+  onUserChanged: (user: AppUser | null) => void,
 ): () => void {
-  return onAuthStateChanged(auth, onUserChanged);
+  return authAdapter.subscribe(auth, onUserChanged);
 }

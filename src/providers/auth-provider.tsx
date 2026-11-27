@@ -8,7 +8,7 @@ import {
   useRef,
 } from 'react';
 import type { ReactNode } from 'react';
-import type { User } from '@react-native-firebase/auth';
+import type { AppUser } from '@/types/firebase';
 import { describeAuthError } from '@/lib/auth/errors';
 import {
   loginWithEmailPassword,
@@ -21,7 +21,7 @@ import { authStateReducer, initialAuthState } from '@/lib/auth/state';
 import { getFirebaseServices } from '@/lib/firebase';
 
 type AuthContextValue = {
-  user: User | null;
+  user: AppUser | null;
   sessionId: number;
   authLoading: boolean;
   actionPending: boolean;

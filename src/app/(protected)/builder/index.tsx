@@ -107,16 +107,19 @@ export default function BuilderHomeScreen() {
   const [readStatus, setReadStatus] = useState<NoticeReadStatusResult | null>(null);
   const [unitInfoDrafts, setUnitInfoDrafts] = useState<Record<string, UnitInfoDraft>>({});
 
-  const load = async (showLoading: boolean) => {
+  const load = async (showLoading: boolean): Promise<BuilderSnapshot | null> => {
     if (showLoading) {
       setLoading(true);
     }
     setLoadError(null);
     try {
       const { firestore } = getFirebaseServices();
-      setSnapshot(await loadBuilderSnapshot(firestore, constructionProjectId));
+      const data = await loadBuilderSnapshot(firestore, constructionProjectId);
+      setSnapshot(data);
+      return data;
     } catch (loadFailure) {
       setLoadError(describeCallableError(loadFailure));
+      return null;
     } finally {
       setLoading(false);
     }
@@ -153,16 +156,23 @@ export default function BuilderHomeScreen() {
     key: string,
     action: () => Promise<T>,
     successMessage?: string,
+    reloadAfterAction = true,
   ): Promise<T | null> => {
     setBusy(key);
     setError(null);
     setMessage(null);
     try {
       const result = await action();
+      if (reloadAfterAction) {
+        const refreshed = await refresh();
+        if (!refreshed) {
+          setError('The action completed, but the latest data could not be loaded. Refresh to verify.');
+          return result;
+        }
+      }
       if (successMessage) {
         setMessage(successMessage);
       }
-      await refresh();
       return result;
     } catch (actionError) {
       setError(describeCallableError(actionError));
@@ -235,19 +245,28 @@ export default function BuilderHomeScreen() {
           constructionProgress,
           possessionDate,
         }),
-      `Updated details for ${unit.label}.`,
+      undefined,
+      false,
     );
     if (!result) {
       return;
     }
+
+    const refreshed = await refresh();
+    if (!refreshed) {
+      setError('Details were saved, but the latest values could not be loaded. Refresh to verify.');
+      return;
+    }
+    const savedUnit = refreshed.units.find((item) => item.id === unit.id);
+    if (!savedUnit) {
+      setError('Details were saved, but the latest values could not be loaded. Refresh to verify.');
+      return;
+    }
     setUnitInfoDrafts((current) => ({
       ...current,
-      [unit.id]: {
-        configuration: result.configuration,
-        constructionProgress: String(result.constructionProgress),
-        possessionDate: result.possessionDate,
-      },
+      [unit.id]: draftForUnit(savedUnit),
     }));
+    setMessage(`Updated details for ${unit.label}.`);
   };
 
   const applyCsv = (value: string, fileName: string | null = null) => {

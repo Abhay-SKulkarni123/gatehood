@@ -137,6 +137,41 @@ describe('Phase 5 trusted buyer workflows', () => {
     expect(undeliveredFeed.exists).toBe(false);
   });
 
+  it('keeps saved unit details readable after a fresh read and leaves failed writes unapplied', async () => {
+    const data = {
+      projectId: PROJECT_ID,
+      unitId: UNIT_ONE_ID,
+      configuration: '3 BHK',
+      constructionProgress: 70,
+      possessionDate: '2027-09-30',
+    };
+
+    const result = await updateUnitInfoCallable(callableRequest(data, BUILDER_UID));
+
+    expect(result).toMatchObject(data);
+    const reloaded = await db.doc(paths.unit(PROJECT_ID, UNIT_ONE_ID)).get();
+    expect(reloaded.data()).toMatchObject({
+      configuration: '3 BHK',
+      constructionProgress: 70,
+      updatedByUid: BUILDER_UID,
+    });
+    expect(reloaded.data()?.possessionDate.toMillis()).toBe(Date.UTC(2027, 8, 30));
+
+    await expect(
+      updateUnitInfoCallable(
+        callableRequest({ ...data, constructionProgress: 101 }, BUILDER_UID),
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-argument' });
+
+    const afterFailedWrite = await db.doc(paths.unit(PROJECT_ID, UNIT_ONE_ID)).get();
+    expect(afterFailedWrite.data()).toMatchObject({
+      configuration: '3 BHK',
+      constructionProgress: 70,
+      updatedByUid: BUILDER_UID,
+    });
+    expect(afterFailedWrite.data()?.possessionDate.toMillis()).toBe(Date.UTC(2027, 8, 30));
+  });
+
   it('lets builders update unit details and rejects buyers, unauthenticated callers, and invalid input', async () => {
     const data = {
       projectId: PROJECT_ID,

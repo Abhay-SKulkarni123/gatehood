@@ -1,7 +1,7 @@
-import type { User } from '@react-native-firebase/auth';
+import type { AppUser } from '@/types/firebase';
 
 export type AuthState = {
-  user: User | null;
+  user: AppUser | null;
   sessionId: number;
   authLoading: boolean;
   actionPending: boolean;
@@ -9,8 +9,8 @@ export type AuthState = {
 };
 
 export type AuthStateEvent =
-  | { type: 'initialized'; user: User | null }
-  | { type: 'userChanged'; user: User | null }
+  | { type: 'initialized'; user: AppUser | null }
+  | { type: 'userChanged'; user: AppUser | null }
   | { type: 'actionStarted' }
   | { type: 'actionSucceeded' }
   | { type: 'actionFailed'; message: string }

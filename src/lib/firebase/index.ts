@@ -19,6 +19,7 @@ import {
   resolveWebAppCheckProvider,
   toWebFirebaseOptions,
 } from './platform';
+import { connectWebAuthEmulator, getWebAuth } from './web-auth';
 import { initializeWebAppCheck } from './web-app-check';
 import { connectWebFirestoreEmulator } from './web-firestore';
 
@@ -82,18 +83,28 @@ async function initializeFirebaseServices(
     platform === 'web' && config.webFirebase
       ? initializeWebAppCheck(app.name, config.webFirebase, useDebugWebAppCheck)
       : getNativeAppCheck(app);
-  const auth = getAuth(app);
+  let auth: FirebaseServices['auth'];
+  if (platform === 'web') {
+    const webAuth = getWebAuth(app.name);
+    if (config.useFirebaseEmulator && !authEmulatorConnected) {
+      connectWebAuthEmulator(webAuth, resolveEmulatorHost(Platform.OS));
+      authEmulatorConnected = true;
+    }
+    auth = webAuth;
+  } else {
+    const nativeAuth = getAuth(app);
+    if (config.useFirebaseEmulator && !authEmulatorConnected) {
+      connectAuthEmulator(nativeAuth, `http://${resolveEmulatorHost(Platform.OS)}:9099`);
+      authEmulatorConnected = true;
+    }
+    auth = nativeAuth;
+  }
   const firestore =
     platform === 'web' ? getFirestore(app) : initializeFirestore(app, { persistence: true });
   const functions = getFunctions(app, config.functionsRegion);
 
   if (config.useFirebaseEmulator) {
     const host = resolveEmulatorHost(Platform.OS);
-
-    if (!authEmulatorConnected) {
-      connectAuthEmulator(auth, `http://${host}:9099`);
-      authEmulatorConnected = true;
-    }
 
     if (!firestoreEmulatorConnected) {
       connectFirestoreEmulator(firestore, host, 8080);

@@ -27,6 +27,11 @@ jest.mock('@react-native-firebase/functions', () => ({
   getFunctions: jest.fn(() => ({ kind: 'functions' })),
 }));
 
+jest.mock('@/lib/firebase/web-auth', () => ({
+  connectWebAuthEmulator: jest.fn(),
+  getWebAuth: jest.fn(() => ({ kind: 'web-auth' })),
+}));
+
 jest.mock('@/lib/firebase/web-app-check', () => ({
   initializeWebAppCheck: jest.fn(() => ({ kind: 'web-app-check' })),
 }));
@@ -41,6 +46,7 @@ const appCheckModule = jest.requireMock('@react-native-firebase/app-check');
 const authModule = jest.requireMock('@react-native-firebase/auth');
 const firestoreModule = jest.requireMock('@react-native-firebase/firestore');
 const functionsModule = jest.requireMock('@react-native-firebase/functions');
+const webAuthModule = jest.requireMock('@/lib/firebase/web-auth');
 const webAppCheckModule = jest.requireMock('@/lib/firebase/web-app-check');
 const webFirestoreModule = jest.requireMock('@/lib/firebase/web-firestore');
 
@@ -82,6 +88,8 @@ function resetMocks() {
   firestoreModule.getFirestore.mockReturnValue({ kind: 'web-firestore' });
   firestoreModule.initializeFirestore.mockReturnValue({ kind: 'native-firestore' });
   functionsModule.getFunctions.mockReturnValue({ kind: 'functions' });
+  webAuthModule.getWebAuth.mockReturnValue({ kind: 'web-auth' });
+  webAuthModule.connectWebAuthEmulator.mockImplementation(() => undefined);
   webAppCheckModule.initializeWebAppCheck.mockReturnValue({ kind: 'web-app-check' });
   webFirestoreModule.connectWebFirestoreEmulator.mockImplementation(() => undefined);
   webFirestoreModule.getWebFirestore.mockReturnValue({ kind: 'full-web-firestore' });
@@ -114,7 +122,7 @@ describe('platform-aware Firebase initialization', () => {
       true,
     );
     const appCheckOrder = webAppCheckModule.initializeWebAppCheck.mock.invocationCallOrder[0];
-    expect(appCheckOrder).toBeLessThan(authModule.getAuth.mock.invocationCallOrder[0]);
+    expect(appCheckOrder).toBeLessThan(webAuthModule.getWebAuth.mock.invocationCallOrder[0]);
     expect(appCheckOrder).toBeLessThan(firestoreModule.getFirestore.mock.invocationCallOrder[0]);
     expect(appCheckOrder).toBeLessThan(functionsModule.getFunctions.mock.invocationCallOrder[0]);
     expect(functionsModule.getFunctions).toHaveBeenCalledWith(app, 'us-central1');
@@ -133,6 +141,13 @@ describe('platform-aware Firebase initialization', () => {
     expect(appModule.getApp).toHaveBeenCalledTimes(1);
     expect(appCheckModule.initializeAppCheck).toHaveBeenCalledTimes(1);
     expect(appCheckModule.ReactNativeFirebaseAppCheckProvider).toHaveBeenCalledTimes(1);
+    expect(authModule.getAuth).toHaveBeenCalledWith(app);
+    expect(authModule.connectAuthEmulator).toHaveBeenCalledWith(
+      { kind: 'auth' },
+      'http://127.0.0.1:9099',
+    );
+    expect(webAuthModule.getWebAuth).not.toHaveBeenCalled();
+    expect(webAuthModule.connectWebAuthEmulator).not.toHaveBeenCalled();
     expect(firestoreModule.initializeFirestore).toHaveBeenCalledWith(app, { persistence: true });
     expect(firestoreModule.getFirestore).not.toHaveBeenCalled();
     expect(webAppCheckModule.initializeWebAppCheck).not.toHaveBeenCalled();
@@ -159,10 +174,11 @@ describe('platform-aware Firebase initialization', () => {
 
     await firebase.initializeFirebase(createConfig(), 'web');
 
-    expect(authModule.connectAuthEmulator).toHaveBeenCalledWith(
-      { kind: 'auth' },
-      'http://127.0.0.1:9099',
+    expect(webAuthModule.connectWebAuthEmulator).toHaveBeenCalledWith(
+      { kind: 'web-auth' },
+      '127.0.0.1',
     );
+    expect(authModule.connectAuthEmulator).not.toHaveBeenCalled();
     expect(firestoreModule.connectFirestoreEmulator).toHaveBeenCalledWith(
       { kind: 'web-firestore' },
       '127.0.0.1',

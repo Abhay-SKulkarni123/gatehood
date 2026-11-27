@@ -1,9 +1,5 @@
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-} from '@react-native-firebase/auth';
 import { getFirebaseServices } from '@/lib/firebase';
+import { authAdapter } from './platform';
 import {
   AuthActionError,
   describeAuthError,
@@ -33,7 +29,7 @@ export async function loginWithEmailPassword(email: string, password: string): P
 
   const auth = getFirebaseServices().auth;
   await runAuthAction(async () => {
-    await signInWithEmailAndPassword(auth, email.trim(), password);
+    await authAdapter.signIn(auth, email.trim(), password);
   });
 }
 
@@ -49,13 +45,13 @@ export async function registerBuyer({
 
   const auth = getFirebaseServices().auth;
   await runAuthAction(async () => {
-    await createUserWithEmailAndPassword(auth, email.trim(), password);
+    await authAdapter.register(auth, email.trim(), password);
   });
 }
 
 export async function logoutUser(): Promise<void> {
   const auth = getFirebaseServices().auth;
   await runAuthAction(async () => {
-    await signOut(auth);
+    await authAdapter.logout(auth);
   });
 }
