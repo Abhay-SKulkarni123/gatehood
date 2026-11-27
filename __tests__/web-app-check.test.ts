@@ -29,9 +29,15 @@ type WebAppCheckGlobal = typeof globalThis & {
 type ConfigOverrides = Partial<{
   appCheckSiteKey: string | null;
   appCheckProvider: string;
+  appCheckDebugToken: string | null;
 }>;
 
+const LOCAL_DEBUG_TOKEN = '11111111-2222-4333-8444-555555555555';
+
 function config(overrides: ConfigOverrides = {}) {
+  const appCheckDebugToken =
+    'appCheckDebugToken' in overrides ? overrides.appCheckDebugToken : LOCAL_DEBUG_TOKEN;
+
   return {
     apiKey: 'web-api-key',
     authDomain: 'infra-project.firebaseapp.com',
@@ -45,6 +51,7 @@ function config(overrides: ConfigOverrides = {}) {
       : 'recaptchaEnterprise') as 'recaptchaEnterprise',
     appCheckSiteKey:
       'appCheckSiteKey' in overrides ? overrides.appCheckSiteKey : 'site-key',
+    ...(appCheckDebugToken ? { appCheckDebugToken } : {}),
   };
 }
 
@@ -59,7 +66,7 @@ describe('web App Check Enterprise provider', () => {
     delete (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN;
   });
 
-  it('sets debug-token mode and acquires a token before returning in development', async () => {
+  it('sets the configured debug token before initializeAppCheck in development', async () => {
     const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
 
     await initializeWebAppCheck('[DEFAULT]', config(), true);
@@ -67,12 +74,16 @@ describe('web App Check Enterprise provider', () => {
     const provider = appCheckSdk.ReCaptchaEnterpriseProvider.mock.results[0].value;
     const appCheck = appCheckSdk.initializeAppCheck.mock.results[0].value;
 
-    expect(provider.debugTokenAtProviderCreation).toBe(true);
-    expect(appCheck.debugTokenAtInitialization).toBe(true);
-    expect(appCheckSdk.getToken).toHaveBeenCalledWith(appCheck, true);
+    expect((globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN).toBe(LOCAL_DEBUG_TOKEN);
+    expect(provider.debugTokenAtProviderCreation).toBe(LOCAL_DEBUG_TOKEN);
+    expect(appCheck.debugTokenAtInitialization).toBe(LOCAL_DEBUG_TOKEN);
+    expect(appCheckSdk.ReCaptchaEnterpriseProvider.mock.invocationCallOrder[0]).toBeLessThan(
+      appCheckSdk.initializeAppCheck.mock.invocationCallOrder[0],
+    );
     expect(appCheckSdk.initializeAppCheck.mock.invocationCallOrder[0]).toBeLessThan(
       appCheckSdk.getToken.mock.invocationCallOrder[0],
     );
+    expect(appCheckSdk.getToken).toHaveBeenCalledWith(appCheck, true);
     expect(appCheckSdk.ReCaptchaEnterpriseProvider).toHaveBeenCalledWith('site-key');
     expect(appCheckSdk.ReCaptchaV3Provider).not.toHaveBeenCalled();
     expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
@@ -82,37 +93,78 @@ describe('web App Check Enterprise provider', () => {
     });
   });
 
-  it('preserves an explicitly registered debug token', async () => {
+  it('reuses the same configured debug token across initialization', async () => {
     const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
-    (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN = 'registered-token';
 
     await initializeWebAppCheck('[DEFAULT]', config(), true);
+    const firstToken = (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN;
+    await initializeWebAppCheck('[DEFAULT]', config(), true);
+    const secondToken = (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN;
 
-    expect((globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN).toBe('registered-token');
+    expect(firstToken).toBe(LOCAL_DEBUG_TOKEN);
+    expect(secondToken).toBe(LOCAL_DEBUG_TOKEN);
+    expect(appCheckSdk.ReCaptchaEnterpriseProvider.mock.results[0].value.debugTokenAtProviderCreation).toBe(
+      LOCAL_DEBUG_TOKEN,
+    );
+    expect(appCheckSdk.ReCaptchaEnterpriseProvider.mock.results[1].value.debugTokenAtProviderCreation).toBe(
+      LOCAL_DEBUG_TOKEN,
+    );
     expect(appCheckSdk.initializeAppCheck.mock.results[0].value.debugTokenAtInitialization).toBe(
-      'registered-token',
+      LOCAL_DEBUG_TOKEN,
     );
-    expect(appCheckSdk.getToken).toHaveBeenCalledWith(
-      appCheckSdk.initializeAppCheck.mock.results[0].value,
-      true,
+    expect(appCheckSdk.initializeAppCheck.mock.results[1].value.debugTokenAtInitialization).toBe(
+      LOCAL_DEBUG_TOKEN,
     );
+  });
+
+  it('ignores debug-token configuration outside local development', async () => {
+    const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
+    (globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN = LOCAL_DEBUG_TOKEN;
+
+    await initializeWebAppCheck('[DEFAULT]', config(), false);
+
+    const provider = appCheckSdk.ReCaptchaEnterpriseProvider.mock.results[0].value;
+    const appCheck = appCheckSdk.initializeAppCheck.mock.results[0].value;
+
+    expect((globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN).toBeUndefined();
+    expect(provider.debugTokenAtProviderCreation).toBeUndefined();
+    expect(appCheck.debugTokenAtInitialization).toBeUndefined();
+    expect(appCheckSdk.getToken).toHaveBeenCalledWith(appCheck, false);
+    expect(appCheckSdk.ReCaptchaEnterpriseProvider).toHaveBeenCalledWith('site-key');
     expect(appCheckSdk.ReCaptchaV3Provider).not.toHaveBeenCalled();
     expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
   });
 
-  it('uses the Enterprise provider and cached token without debug mode in production', async () => {
+  it('fails safely when debug mode is requested without a configured token', async () => {
     const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
 
-    await initializeWebAppCheck('[DEFAULT]', config(), false);
-
-    const appCheck = appCheckSdk.initializeAppCheck.mock.results[0].value;
-
-    expect(appCheckSdk.ReCaptchaEnterpriseProvider).toHaveBeenCalledWith('site-key');
-    expect(appCheckSdk.ReCaptchaV3Provider).not.toHaveBeenCalled();
-    expect(appCheckSdk.CustomProvider).not.toHaveBeenCalled();
-    expect(appCheck.debugTokenAtInitialization).toBeUndefined();
-    expect(appCheckSdk.getToken).toHaveBeenCalledWith(appCheck, false);
+    await expect(
+      initializeWebAppCheck('[DEFAULT]', config({ appCheckDebugToken: null }), true),
+    ).rejects.toThrow(
+      'A local Firebase App Check debug token is required. Set EXPO_PUBLIC_FIREBASE_APPCHECK_DEBUG_TOKEN for local development.',
+    );
     expect((globalThis as WebAppCheckGlobal).FIREBASE_APPCHECK_DEBUG_TOKEN).toBeUndefined();
+    expect(appCheckSdk.initializeAppCheck).not.toHaveBeenCalled();
+    expect(appCheckSdk.getToken).not.toHaveBeenCalled();
+  });
+
+  it('fails safely when the configured debug token is invalid', async () => {
+    const { initializeWebAppCheck } = require('@/lib/firebase/web-app-check');
+    const invalidToken = 'invalid-debug-token';
+
+    let thrown: unknown;
+    try {
+      await initializeWebAppCheck('[DEFAULT]', config({ appCheckDebugToken: invalidToken }), true);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(
+      /EXPO_PUBLIC_FIREBASE_APPCHECK_DEBUG_TOKEN must be a valid Firebase App Check debug token\./,
+    );
+    expect((thrown as Error).message).not.toContain(invalidToken);
+    expect(appCheckSdk.initializeAppCheck).not.toHaveBeenCalled();
   });
 
   it('fails without exposing token details when token acquisition fails', async () => {

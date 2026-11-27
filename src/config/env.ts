@@ -16,6 +16,7 @@ export type WebFirebaseConfig = {
   databaseUrl: string;
   appCheckProvider: AppCheckWebProvider;
   appCheckSiteKey: string;
+  appCheckDebugToken?: string;
 };
 
 export type ClientConfig = {
@@ -52,6 +53,7 @@ function parseWebFirebaseConfig(
   const configuredDatabaseUrl = readValue(env, 'EXPO_PUBLIC_FIREBASE_DATABASE_URL');
   const appCheckProvider = readValue(env, 'EXPO_PUBLIC_APP_CHECK_PROVIDER');
   const appCheckSiteKey = readValue(env, 'EXPO_PUBLIC_APP_CHECK_SITE_KEY');
+  const appCheckDebugToken = readValue(env, 'EXPO_PUBLIC_FIREBASE_APPCHECK_DEBUG_TOKEN');
 
   const hasWebConfig = [
     apiKey,
@@ -100,6 +102,7 @@ function parseWebFirebaseConfig(
     databaseUrl,
     appCheckProvider: appCheckProvider as AppCheckWebProvider,
     appCheckSiteKey,
+    ...(appCheckDebugToken ? { appCheckDebugToken } : {}),
   };
 }
 

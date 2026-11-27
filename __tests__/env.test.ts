@@ -67,6 +67,18 @@ describe('parseClientConfig', () => {
     });
   });
 
+  it('parses an optional local App Check debug token', () => {
+    const parsed = parseClientConfig(
+      {
+        ...validWebEnv,
+        EXPO_PUBLIC_FIREBASE_APPCHECK_DEBUG_TOKEN: '11111111-2222-4333-8444-555555555555',
+      },
+      'web',
+    );
+
+    expect(parsed.webFirebase?.appCheckDebugToken).toBe('11111111-2222-4333-8444-555555555555');
+  });
+
   it('requires Firebase web configuration on web', () => {
     expect(() => parseClientConfig(validEnv, 'web')).toThrow(
       'Firebase web configuration is required when running on web.',
