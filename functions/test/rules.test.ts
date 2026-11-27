@@ -85,6 +85,39 @@ describe('Firestore security rules', () => {
     );
   });
 
+  it('allows builders but not buyers to read canonical notices and fan-out failures', async () => {
+    const now = timestampNow();
+    await db.doc(paths.notice(PROJECT_ID, 'notice-1')).set({
+      id: 'notice-1',
+      projectId: PROJECT_ID,
+      title: 'Title',
+      body: 'Body',
+      pinned: false,
+      audience: { type: 'project' },
+      audienceCount: 1,
+      readCount: 0,
+      fanoutStatus: 'complete',
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.doc(paths.failure(PROJECT_ID, 'failure-1')).set({
+      id: 'failure-1',
+      noticeId: 'notice-1',
+      projectId: PROJECT_ID,
+      uid: BUYER_ONE_UID,
+      reason: 'test',
+      createdAt: now,
+      updatedAt: now,
+    });
+    const builderDb = testEnv.authenticatedContext(BUILDER_UID).firestore();
+    const buyerDb = testEnv.authenticatedContext(BUYER_ONE_UID).firestore();
+
+    await assertSucceeds(builderDb.doc(paths.notice(PROJECT_ID, 'notice-1')).get());
+    await assertFails(buyerDb.doc(paths.notice(PROJECT_ID, 'notice-1')).get());
+    await assertSucceeds(builderDb.doc(paths.failure(PROJECT_ID, 'failure-1')).get());
+    await assertFails(buyerDb.doc(paths.failure(PROJECT_ID, 'failure-1')).get());
+  });
+
   it('denies client writes to canonical notices', async () => {
     const builderDb = testEnv.authenticatedContext(BUILDER_UID).firestore();
     await assertFails(

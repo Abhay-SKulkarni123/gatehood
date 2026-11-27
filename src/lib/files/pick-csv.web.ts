@@ -1,6 +1,6 @@
 import type { PickedCsvFile } from './types';
 
-export function pickCsvFileWeb(): Promise<PickedCsvFile | null> {
+export function pickCsvFile(): Promise<PickedCsvFile | null> {
   if (typeof document === 'undefined') {
     return Promise.resolve(null);
   }

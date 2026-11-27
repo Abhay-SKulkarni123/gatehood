@@ -52,7 +52,10 @@ describe('Phase 4 client helpers', () => {
       'You do not have access to this operation.',
     );
     expect(describeCallableError({ code: 'functions/unauthenticated' })).toBe(
-      'Sign in again to continue.',
+      'Request was rejected by Firebase. Check your session and App Check configuration, then try again.',
+    );
+    expect(describeCallableError({ code: 'appcheck/fetch-status-error' })).toBe(
+      'App Check could not verify this request. Check your configuration and try again.',
     );
     expect(describeCallableError(new Error('CSV row is invalid'))).toBe('CSV row is invalid');
     expect(describeCallableError(null)).toBe(

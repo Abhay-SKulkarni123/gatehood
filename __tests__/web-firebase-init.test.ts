@@ -163,6 +163,25 @@ describe('platform-aware Firebase initialization', () => {
     expect(functionsModule.getFunctions).toHaveBeenCalledTimes(1);
   });
 
+  it('allows retry after a failed web App Check initialization', async () => {
+    const firebase = loadFirebaseModule();
+    const config = createConfig();
+
+    webAppCheckModule.initializeWebAppCheck
+      .mockRejectedValueOnce(new Error('temporary app check failure'))
+      .mockResolvedValueOnce({ kind: 'web-app-check' });
+
+    await expect(firebase.initializeFirebase(config, 'web')).rejects.toThrow(
+      'temporary app check failure',
+    );
+
+    const services = await firebase.initializeFirebase(config, 'web');
+
+    expect(services.appCheck).toEqual({ kind: 'web-app-check' });
+    expect(webAppCheckModule.initializeWebAppCheck).toHaveBeenCalledTimes(2);
+    expect(functionsModule.getFunctions).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves native initialization', async () => {
     const firebase = loadFirebaseModule();
     const config = createConfig();

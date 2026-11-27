@@ -28,7 +28,11 @@ export async function requireProjectRole(
 
   try {
     const membership = parseMembership(snapshot.data());
-    if (membership.role !== role) {
+    if (
+      membership.role !== role ||
+      membership.uid !== uid ||
+      membership.projectId !== projectId
+    ) {
       throw permissionDenied();
     }
     return membership;

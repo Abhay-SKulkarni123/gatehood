@@ -35,6 +35,10 @@ export function nextFeedLimit(limit: number): number {
   return limit + FEED_PAGE_SIZE;
 }
 
+export function shouldShowEmptyFeed(state: BuyerFeedState, filteredCount: number): boolean {
+  return !state.loading && !state.error && !state.hasMore && filteredCount === 0;
+}
+
 export function createFeedState(scopeKey: string): BuyerFeedState {
   return {
     scopeKey,

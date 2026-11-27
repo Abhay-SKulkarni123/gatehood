@@ -48,8 +48,11 @@ export function describeCallableError(error: unknown): string {
   if (code === 'permission-denied') {
     return 'You do not have access to this operation.';
   }
+  if (code.startsWith('appcheck/')) {
+    return 'App Check could not verify this request. Check your configuration and try again.';
+  }
   if (code === 'unauthenticated') {
-    return 'Sign in again to continue.';
+    return 'Request was rejected by Firebase. Check your session and App Check configuration, then try again.';
   }
   if (message) {
     return message;

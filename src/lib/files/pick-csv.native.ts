@@ -1,7 +1,7 @@
 import { File } from 'expo-file-system';
 import type { PickedCsvFile } from './types';
 
-export async function pickCsvFileNative(): Promise<PickedCsvFile | null> {
+export async function pickCsvFile(): Promise<PickedCsvFile | null> {
   const picked = await File.pickFileAsync({
     mimeTypes: ['text/csv', 'text/plain', 'application/vnd.ms-excel'],
   });

@@ -16,7 +16,10 @@ module.exports = {
         ...sourceMapper,
       },
       testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
-      testPathIgnorePatterns: ['<rootDir>/__tests__/membership-provider.test.tsx'],
+      testPathIgnorePatterns: [
+        '<rootDir>/__tests__/membership-provider.test.tsx',
+        '<rootDir>/__tests__/pick-csv.test.ts',
+      ],
     },
     {
       displayName: 'provider',
@@ -29,7 +32,10 @@ module.exports = {
         ...expoProjectPreset.moduleNameMapper,
         ...sourceMapper,
       },
-      testMatch: ['**/__tests__/membership-provider.test.tsx'],
+      testMatch: [
+        '**/__tests__/membership-provider.test.tsx',
+        '**/__tests__/pick-csv.test.ts',
+      ],
       setupFiles: [],
     },
   ],

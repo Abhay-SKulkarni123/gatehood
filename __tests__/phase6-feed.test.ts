@@ -18,6 +18,7 @@ import {
   feedReducer,
   feedScopeKey,
   nextFeedLimit,
+  shouldShowEmptyFeed,
 } from '@/lib/data/feed-state';
 
 jest.mock('@react-native-firebase/firestore', () => ({
@@ -129,6 +130,9 @@ test('feed state starts bounded, grows by one page, and resets on scope change',
   });
   expect(errored.error).toBe('offline');
   expect(errored.entries).toEqual([firstEntry]);
+  expect(shouldShowEmptyFeed(errored, 0)).toBe(false);
+  expect(shouldShowEmptyFeed({ ...loaded, hasMore: true }, 0)).toBe(false);
+  expect(shouldShowEmptyFeed(loaded, 0)).toBe(true);
 
   const retried = feedReducer(errored, { type: 'retry' });
   expect(retried.retryKey).toBe(1);

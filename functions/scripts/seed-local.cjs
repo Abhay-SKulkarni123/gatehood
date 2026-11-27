@@ -7,7 +7,7 @@ const BUILDER_UID = 'local-builder-uid';
 const BUYER_UID = 'local-buyer-uid';
 const BUILDER_EMAIL = 'builder@gatehood.test';
 const BUYER_EMAIL = 'buyer@gatehood.test';
-const TEST_PASSWORD = 'Gatehood123!';
+const TEST_PASSWORD = process.env.GATEHOOD_EMULATOR_TEST_PASSWORD;
 const TOWER_ID = 'tower-1';
 const UNIT_ID = 'unit-1';
 
@@ -65,6 +65,9 @@ async function ensureUser(auth, uid, email, displayName) {
 async function main() {
   requireLocalEmulator('FIRESTORE_EMULATOR_HOST');
   requireLocalEmulator('FIREBASE_AUTH_EMULATOR_HOST');
+  if (!TEST_PASSWORD) {
+    throw new Error('Set GATEHOOD_EMULATOR_TEST_PASSWORD before seeding local users.');
+  }
   const projectId = resolveEmulatorProjectId();
 
   const app = getApps().length === 0 ? initializeApp({ projectId }) : getApp();
@@ -162,7 +165,7 @@ async function main() {
   console.log(`Seeded local emulator project ${CONSTRUCTION_PROJECT_ID}.`);
   console.log(`Builder sign-in: ${BUILDER_EMAIL}`);
   console.log(`Buyer sign-in: ${BUYER_EMAIL}`);
-  console.log(`Password for both local users: ${TEST_PASSWORD}`);
+  console.log('Password for both local users was read from GATEHOOD_EMULATOR_TEST_PASSWORD.');
 }
 
 main().catch((error) => {

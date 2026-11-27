@@ -1,4 +1,5 @@
 import { HttpsError } from 'firebase-functions/v2/https';
+import { requireProjectRole } from '../src/auth';
 import { RETRY_BATCH_LIMIT } from '../src/config';
 import * as callableFunctions from '../src/index';
 import type {
@@ -61,6 +62,37 @@ describe('Phase 2 review corrections', () => {
   beforeEach(async () => {
     await clearDatabase();
     await seedProject();
+  });
+
+  it('rejects memberships whose stored uid or project does not match the requested path', async () => {
+    const createdAt = timestampNow();
+    await db.doc(paths.member(PROJECT_ID, BUYER_ONE_UID)).set({
+      uid: BUYER_TWO_UID,
+      projectId: PROJECT_ID,
+      role: 'buyer',
+      towerId: TOWER_ID,
+      unitId: UNIT_ONE_ID,
+      createdByUid: BUILDER_UID,
+      createdAt,
+    });
+
+    await expect(requireProjectRole(PROJECT_ID, BUYER_ONE_UID, 'buyer')).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+
+    await db.doc(paths.member(PROJECT_ID, BUYER_ONE_UID)).set({
+      uid: BUYER_ONE_UID,
+      projectId: 'other-project',
+      role: 'buyer',
+      towerId: TOWER_ID,
+      unitId: UNIT_ONE_ID,
+      createdByUid: BUILDER_UID,
+      createdAt,
+    });
+
+    await expect(requireProjectRole(PROJECT_ID, BUYER_ONE_UID, 'buyer')).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
   });
 
   it('lets only one of two UIDs redeem the same invite', async () => {

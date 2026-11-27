@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { ChoiceChip } from '@/components/choice-chip';
 import { EmptyState } from '@/components/empty-state';
@@ -30,6 +30,7 @@ import {
 } from '@/lib/functions';
 import { pickCsvFile } from '@/lib/files/pick-csv';
 import { getFirebaseServices } from '@/lib/firebase';
+import { createActionGuard } from '@/lib/ui/action-guard';
 import { parseConstructionProgressInput } from '@/lib/ui/unit-info';
 import { useAuth } from '@/providers/auth-provider';
 import type {
@@ -106,6 +107,21 @@ export default function BuilderHomeScreen() {
   const [audienceIds, setAudienceIds] = useState('');
   const [readStatus, setReadStatus] = useState<NoticeReadStatusResult | null>(null);
   const [unitInfoDrafts, setUnitInfoDrafts] = useState<Record<string, UnitInfoDraft>>({});
+  const actionGuard = useRef(createActionGuard(setBusy)).current;
+
+  const beginAction = (key: string): boolean => {
+    if (!actionGuard.begin(key)) {
+      setError('Another action is already in progress. Wait for it to finish.');
+      return false;
+    }
+    setError(null);
+    setMessage(null);
+    return true;
+  };
+
+  const endAction = (key: string): void => {
+    actionGuard.end(key);
+  };
 
   const load = async (showLoading: boolean): Promise<BuilderSnapshot | null> => {
     if (showLoading) {
@@ -158,9 +174,9 @@ export default function BuilderHomeScreen() {
     successMessage?: string,
     reloadAfterAction = true,
   ): Promise<T | null> => {
-    setBusy(key);
-    setError(null);
-    setMessage(null);
+    if (!beginAction(key)) {
+      return null;
+    }
     try {
       const result = await action();
       if (reloadAfterAction) {
@@ -178,7 +194,7 @@ export default function BuilderHomeScreen() {
       setError(describeCallableError(actionError));
       return null;
     } finally {
-      setBusy(null);
+      endAction(key);
     }
   };
 
@@ -278,9 +294,9 @@ export default function BuilderHomeScreen() {
   };
 
   const handlePickCsv = async () => {
-    setBusy('csv-pick');
-    setError(null);
-    setMessage(null);
+    if (!beginAction('csv-pick')) {
+      return;
+    }
     try {
       const picked = await pickCsvFile();
       if (picked) {
@@ -290,14 +306,15 @@ export default function BuilderHomeScreen() {
     } catch (pickError) {
       setError(describeCallableError(pickError));
     } finally {
-      setBusy(null);
+      endAction('csv-pick');
     }
   };
 
   const handleImport = async (dryRun: boolean) => {
-    setBusy(dryRun ? 'import-preview' : 'import');
-    setError(null);
-    setMessage(null);
+    const key = dryRun ? 'import-preview' : 'import';
+    if (!beginAction(key)) {
+      return;
+    }
     try {
       const result = await callImportBuyers(getFirebaseServices().functions, {
         projectId: constructionProjectId,
@@ -321,7 +338,7 @@ export default function BuilderHomeScreen() {
     } catch (importError) {
       setError(describeCallableError(importError));
     } finally {
-      setBusy(null);
+      endAction(key);
     }
   };
 
@@ -396,8 +413,10 @@ export default function BuilderHomeScreen() {
   };
 
   const handleReadStatus = async (noticeId: string) => {
-    setBusy(`status:${noticeId}`);
-    setError(null);
+    const key = `status:${noticeId}`;
+    if (!beginAction(key)) {
+      return;
+    }
     setReadStatus(null);
     try {
       setReadStatus(
@@ -409,7 +428,7 @@ export default function BuilderHomeScreen() {
     } catch (statusError) {
       setError(describeCallableError(statusError));
     } finally {
-      setBusy(null);
+      endAction(key);
     }
   };
 

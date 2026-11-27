@@ -59,12 +59,12 @@ service cloud.firestore {
       }
 
       match /notices/{noticeId} {
-        allow read: if isMember(projectId);
+        allow read: if isRole(projectId, 'builder');
         allow write: if false;
       }
 
       match /fanoutFailures/{failureId} {
-        allow read: if isMember(projectId);
+        allow read: if isRole(projectId, 'builder');
         allow write: if false;
       }
     }

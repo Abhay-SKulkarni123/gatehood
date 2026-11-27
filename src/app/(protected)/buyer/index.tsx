@@ -12,7 +12,12 @@ import { StatusBadge } from '@/components/status-badge';
 import { WorkspaceHeader } from '@/components/workspace-header';
 import { getClientConfig } from '@/config/env';
 import { createFeedListenerController, loadBuyerProject } from '@/lib/data/buyer';
-import { createFeedState, feedReducer, feedScopeKey } from '@/lib/data/feed-state';
+import {
+  createFeedState,
+  feedReducer,
+  feedScopeKey,
+  shouldShowEmptyFeed,
+} from '@/lib/data/feed-state';
 import { describeConstructionProgress, describePossessionDate, loadBuyerUnit } from '@/lib/data/units';
 import { filterBuyerFeed, type BuyerFeedFilter } from '@/lib/data/sort';
 import {
@@ -303,7 +308,7 @@ export default function BuyerHomeScreen() {
             title="Notices unavailable"
           />
         ) : null}
-        {!feed.loading && filteredEntries.length === 0 ? (
+        {shouldShowEmptyFeed(feed, filteredEntries.length) ? (
           <EmptyState
             message={
               feedFilter === 'tower'
