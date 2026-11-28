@@ -31,6 +31,10 @@ function timestampMillis(value: { toMillis(): number }): number {
   return value.toMillis();
 }
 
+export function persistedBuyerCount(snapshot: BuilderSnapshot): number {
+  return snapshot.buyerContacts.length;
+}
+
 export async function loadBuilderSnapshot(
   firestore: Firestore,
   projectId: string,

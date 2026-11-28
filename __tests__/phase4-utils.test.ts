@@ -12,6 +12,18 @@ import type { BuyerImportResult } from '@/types/domain';
 
 const buyerCsv = 'Tower,Unit,Name,Phone\nTower 1,Unit 101,Asha,+15550104\n';
 
+const eightBuyerCsv = [
+  '\uFEFFTower,Unit,Name,Phone',
+  'Tower 1,Unit 101,Aarav Sharma,+15550100001',
+  'Tower 1,Unit 102,Ananya Rao,+15550100002',
+  'Tower 1,Unit 103,Diya Iyer,+15550100003',
+  'Tower 1,Unit 104,Ishaan Verma,+15550100004',
+  'Tower 2,Unit 201,Kavya Nair,+15550100005',
+  'Tower 2,Unit 202,Meera Patel,+15550100006',
+  'Tower 2,Unit 203,Rehan Khan,+15550100007',
+  'Tower 2,Unit 204,Sanya Gupta,+15550100008',
+].join('\r\n');
+
 function successfulPreview(overrides: Partial<BuyerImportResult> = {}): BuyerImportResult {
   return {
     dryRun: true,
@@ -159,6 +171,33 @@ describe('Phase 4 client helpers', () => {
     expect(duplicate.errors.some((error) => error.includes('Phone number is duplicated'))).toBe(
       true,
     );
+  });
+
+  it('normalizes the exact eight-buyer CSV into mapped preview rows', () => {
+    const validation = validateBuyerCsv(eightBuyerCsv);
+
+    expect(validation.valid).toBe(true);
+    expect(validation.errors).toEqual([]);
+    expect(validation.rows).toHaveLength(8);
+    expect(validation.rows.map((row) => [row.tower, row.unit, row.name, row.phone])).toEqual([
+      ['Tower 1', 'Unit 101', 'Aarav Sharma', '+15550100001'],
+      ['Tower 1', 'Unit 102', 'Ananya Rao', '+15550100002'],
+      ['Tower 1', 'Unit 103', 'Diya Iyer', '+15550100003'],
+      ['Tower 1', 'Unit 104', 'Ishaan Verma', '+15550100004'],
+      ['Tower 2', 'Unit 201', 'Kavya Nair', '+15550100005'],
+      ['Tower 2', 'Unit 202', 'Meera Patel', '+15550100006'],
+      ['Tower 2', 'Unit 203', 'Rehan Khan', '+15550100007'],
+      ['Tower 2', 'Unit 204', 'Sanya Gupta', '+15550100008'],
+    ]);
+    expect(validation.rows.every((row) => row.status === 'create')).toBe(true);
+
+    const invalidRow = validateBuyerCsv(
+      eightBuyerCsv.replace('+15550100003', 'not-a-phone'),
+    );
+    expect(invalidRow.valid).toBe(false);
+    expect(invalidRow.rows).toHaveLength(8);
+    expect(invalidRow.rows.filter((row) => row.status === 'error')).toHaveLength(1);
+    expect(invalidRow.rows[2]).toMatchObject({ row: 4, status: 'error' });
   });
 
   it('orders the buyer feed by pin state then delivery time, not unread state', () => {

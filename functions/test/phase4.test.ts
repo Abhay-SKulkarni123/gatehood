@@ -33,6 +33,39 @@ const createNoticeCallable = callableFunctions.createNotice.run;
 const markNoticeReadCallable = callableFunctions.markNoticeRead.run;
 const redeemInviteCallable = callableFunctions.redeemInvite.run;
 
+const eightBuyerCsv = [
+  'Tower,Unit,Name,Phone',
+  'Tower 1,Unit 101,Aarav Sharma,+15550100001',
+  'Tower 1,Unit 102,Ananya Rao,+15550100002',
+  'Tower 1,Unit 103,Diya Iyer,+15550100003',
+  'Tower 1,Unit 104,Ishaan Verma,+15550100004',
+  'Tower 2,Unit 201,Kavya Nair,+15550100005',
+  'Tower 2,Unit 202,Meera Patel,+15550100006',
+  'Tower 2,Unit 203,Rehan Khan,+15550100007',
+  'Tower 2,Unit 204,Sanya Gupta,+15550100008',
+].join('\n');
+
+const eightBuyers = [
+  { tower: 'Tower 1', unit: 'Unit 101', name: 'Aarav Sharma', phone: '+15550100001', towerId: TOWER_ID },
+  { tower: 'Tower 1', unit: 'Unit 102', name: 'Ananya Rao', phone: '+15550100002', towerId: TOWER_ID },
+  { tower: 'Tower 1', unit: 'Unit 103', name: 'Diya Iyer', phone: '+15550100003', towerId: TOWER_ID },
+  { tower: 'Tower 1', unit: 'Unit 104', name: 'Ishaan Verma', phone: '+15550100004', towerId: TOWER_ID },
+  { tower: 'Tower 2', unit: 'Unit 201', name: 'Kavya Nair', phone: '+15550100005', towerId: TOWER_TWO_ID },
+  { tower: 'Tower 2', unit: 'Unit 202', name: 'Meera Patel', phone: '+15550100006', towerId: TOWER_TWO_ID },
+  { tower: 'Tower 2', unit: 'Unit 203', name: 'Rehan Khan', phone: '+15550100007', towerId: TOWER_TWO_ID },
+  { tower: 'Tower 2', unit: 'Unit 204', name: 'Sanya Gupta', phone: '+15550100008', towerId: TOWER_TWO_ID },
+];
+
+async function unitIdFor(towerId: string, label: string): Promise<string> {
+  const snapshot = await db
+    .collection(paths.units(PROJECT_ID))
+    .where('towerId', '==', towerId)
+    .where('label', '==', label)
+    .get();
+  expect(snapshot.size).toBe(1);
+  return snapshot.docs[0].id;
+}
+
 function padded(index: number): string {
   return String(index).padStart(3, '0');
 }
@@ -204,6 +237,72 @@ describe('Phase 4 trusted operations', () => {
     expect(second.created).toBe(0);
     expect(second.unchanged).toBe(1);
     expect(second.complete).toBe(true);
+  });
+
+  it('persists all eight CSV buyers with mapped tower, unit, name and phone without duplicates', async () => {
+    const preview = (await importBuyersCallable(
+      callableRequest({ projectId: PROJECT_ID, csv: eightBuyerCsv, dryRun: true }, BUILDER_UID),
+    )) as BuyerImportResult;
+    expect(preview.complete).toBe(true);
+    expect(preview.created).toBe(8);
+    expect(preview.failed).toBe(0);
+    expect((await db.collection(paths.buyerContacts(PROJECT_ID)).get()).empty).toBe(true);
+
+    const committed = (await importBuyersCallable(
+      callableRequest({ projectId: PROJECT_ID, csv: eightBuyerCsv, dryRun: false }, BUILDER_UID),
+    )) as BuyerImportResult;
+    expect(committed.complete).toBe(true);
+    expect(committed.created).toBe(8);
+
+    for (const buyer of eightBuyers) {
+      const unitId = await unitIdFor(buyer.towerId, buyer.unit);
+      const contactId = stableImportId('contact', PROJECT_ID, buyer.phone);
+      const contact = await db.doc(paths.buyerContact(PROJECT_ID, contactId)).get();
+      expect(contact.exists).toBe(true);
+      expect(contact.data()).toMatchObject({
+        id: contactId,
+        projectId: PROJECT_ID,
+        towerId: buyer.towerId,
+        unitId,
+        name: buyer.name,
+        phone: buyer.phone,
+        importedByUid: BUILDER_UID,
+      });
+    }
+
+    const contactSnapshot = await db.collection(paths.buyerContacts(PROJECT_ID)).get();
+    expect(contactSnapshot.size).toBe(8);
+    const unitSnapshot = await db.collection(paths.units(PROJECT_ID)).get();
+    expect(unitSnapshot.size).toBe(8);
+    expect((await db.collection(paths.members(PROJECT_ID)).get()).size).toBe(1);
+    expect((await db.collection('users').get()).empty).toBe(true);
+
+    const repeat = (await importBuyersCallable(
+      callableRequest({ projectId: PROJECT_ID, csv: eightBuyerCsv, dryRun: false }, BUILDER_UID),
+    )) as BuyerImportResult;
+    expect(repeat.created).toBe(0);
+    expect(repeat.unchanged).toBe(8);
+    expect((await db.collection(paths.buyerContacts(PROJECT_ID)).get()).size).toBe(8);
+  });
+
+  it('does not count an invalid row as a successful eight-buyer import', async () => {
+    const csv = eightBuyerCsv.replace('+15550100003', '123');
+    const preview = (await importBuyersCallable(
+      callableRequest({ projectId: PROJECT_ID, csv, dryRun: true }, BUILDER_UID),
+    )) as BuyerImportResult;
+
+    expect(preview.created).toBe(7);
+    expect(preview.failed).toBe(1);
+    expect(preview.complete).toBe(false);
+    expect(preview.rows[2]).toMatchObject({ row: 4, status: 'error' });
+
+    await expect(
+      importBuyersCallable(
+        callableRequest({ projectId: PROJECT_ID, csv, dryRun: false }, BUILDER_UID),
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-argument' });
+    expect((await db.collection(paths.buyerContacts(PROJECT_ID)).get()).empty).toBe(true);
+    expect((await db.collection(paths.units(PROJECT_ID)).get()).size).toBe(3);
   });
 
   it('generates a single-use invite whose plaintext code is returned once and stored as a hash', async () => {

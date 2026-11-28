@@ -17,7 +17,7 @@ import {
   type BuyerImportPreview,
 } from '@/lib/csv/buyer-import';
 import type { BuilderSnapshot } from '@/lib/data/builder';
-import { loadBuilderSnapshot } from '@/lib/data/builder';
+import { loadBuilderSnapshot, persistedBuyerCount } from '@/lib/data/builder';
 import { isValidPossessionDateInput, possessionDateToIsoDate } from '@/lib/data/units';
 import {
   describeCallableError,
@@ -329,11 +329,16 @@ export default function BuilderHomeScreen() {
         setCsvFileName(null);
         setClientCsvErrors([]);
         setImportPreview(null);
+        const refreshed = await refresh();
+        if (!refreshed) {
+          setError('Buyers were imported, but the saved records could not be reloaded. Refresh to verify.');
+          return;
+        }
+        const persistedCount = persistedBuyerCount(refreshed);
         setMessage(
-          `${result.created} buyer contact${result.created === 1 ? '' : 's'} imported; ` +
+          `${persistedCount} persisted buyer record${persistedCount === 1 ? '' : 's'}; ` +
             `${result.unchanged} unchanged.`,
         );
-        await refresh();
       }
     } catch (importError) {
       setError(describeCallableError(importError));
@@ -511,8 +516,11 @@ export default function BuilderHomeScreen() {
               <Text style={styles.statValue}>{snapshot.units.length}</Text>
               <Text style={styles.statLabel}>Units</Text>
             </View>
-            <View accessibilityLabel={`${snapshot.buyers.length} buyers`} style={styles.statCard}>
-              <Text style={styles.statValue}>{snapshot.buyers.length}</Text>
+            <View
+              accessibilityLabel={`${persistedBuyerCount(snapshot)} buyers`}
+              style={styles.statCard}
+            >
+              <Text style={styles.statValue}>{persistedBuyerCount(snapshot)}</Text>
               <Text style={styles.statLabel}>Buyers</Text>
             </View>
             <View accessibilityLabel={`${snapshot.notices.length} notices`} style={styles.statCard}>
